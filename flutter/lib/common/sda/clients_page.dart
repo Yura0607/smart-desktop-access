@@ -369,11 +369,12 @@ class _SdaEmailCardState extends State<SdaEmailCard> {
     if (saved.isNotEmpty && _controller.text.trim() == saved) {
       return const SizedBox.shrink();
     }
+    final light = Theme.of(context).brightness == Brightness.light;
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F2FF),
+        color: light ? const Color(0xFFF3F0FF) : const Color(0xFF2A2448),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(

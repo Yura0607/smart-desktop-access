@@ -34,7 +34,7 @@ class DesktopHomePage extends StatefulWidget {
   State<DesktopHomePage> createState() => _DesktopHomePageState();
 }
 
-const borderColor = Color(0xFF2F65BA);
+const borderColor = Color(0xFF3B5BFF);
 
 class _DesktopHomePageState extends State<DesktopHomePage>
     with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
@@ -96,7 +96,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         Obx(() => stateGlobal.videoConnCount.value > 0
             ? Container(
                 width: double.infinity,
-                color: const Color(0xFF0B63E5),
+                decoration: MyTheme.headerDecoration,
                 padding:
                     const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                 child: const Text(

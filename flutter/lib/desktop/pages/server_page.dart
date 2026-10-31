@@ -199,7 +199,7 @@ class ConnectionManagerState extends State<ConnectionManager>
             children: [
               Container(
                 width: double.infinity,
-                color: const Color(0xFF0B63E5),
+                decoration: MyTheme.headerDecoration,
                 padding:
                     const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
                 child: const Text(
