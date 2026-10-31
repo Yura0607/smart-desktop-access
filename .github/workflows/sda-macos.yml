@@ -9,7 +9,7 @@ on:
 # Release, so it does not move the stable "latest" release.
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:

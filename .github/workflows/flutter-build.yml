@@ -118,7 +118,7 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -1267,8 +1267,9 @@ jobs:
       group: signed-update-${{ inputs.upload-tag }}
       cancel-in-progress: false
     permissions:
-      # Required to inspect and publish signed release assets for the target tag.
-      contents: write
+      # This job only runs for the upstream repository. Keep the token at
+      # read so a caller with a read-only token can still start the workflow.
+      contents: read
     steps:
       - name: Refuse to replace published update metadata
         shell: bash
