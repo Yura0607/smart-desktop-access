@@ -1,9 +1,8 @@
 name: Flutter Nightly Build
 
 on:
-  schedule:
-    # schedule build every night
-    - cron: "0 0 * * *"
+  # The nightly matrix is the upstream one and would spend the free Actions
+  # minutes. Publish with .github/workflows/sda-release.yml instead.
   workflow_dispatch:
 
 jobs:
