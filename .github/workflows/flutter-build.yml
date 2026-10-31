@@ -148,7 +148,7 @@ jobs:
 
   build-RustDeskTempTopMostWindow:
     needs: [validate-update-metadata-keys]
-    if: ${{ !inputs.macos-only && (!inputs.product-build || matrix.job.platform == 'x64') }}
+    if: ${{ !inputs.macos-only }}
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     strategy:
       fail-fast: false
@@ -172,7 +172,7 @@ jobs:
   build-for-windows-flutter:
     name: ${{ matrix.job.target }}
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
-    if: ${{ !inputs.macos-only && (!inputs.product-build || matrix.job.arch == 'x86_64') }}
+    if: ${{ !inputs.macos-only }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
@@ -1483,7 +1483,7 @@ jobs:
   build-rustdesk-android:
     needs: [generate-bridge]
     name: build rustdesk android apk ${{ matrix.job.target }}
-    if: ${{ !inputs.macos-only && (!inputs.product-build || inputs.variant == 'admin') && (!inputs.product-build || matrix.job.arch == 'aarch64') }}
+    if: ${{ !inputs.macos-only && (!inputs.product-build || inputs.variant == 'admin') }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
