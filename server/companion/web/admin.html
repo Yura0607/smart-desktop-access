@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Desktop Access Admin</title>
+  <link rel="icon" href="/favicon.ico">
+  <style>
+    body { font-family: sans-serif; margin: 24px; color: #102033; background: #f4f8fc; }
+    h1 { font-size: 1.4rem; }
+    .card { background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    button { margin-right: 8px; }
+    .online { color: #0b8f4d; font-weight: 700; }
+    .offline { color: #667; }
+    .new { background: #0b63e5; color: #fff; border-radius: 8px; padding: 2px 8px; font-size: .8rem; }
+    input { padding: 8px; width: min(420px, 100%); }
+  </style>
+</head>
+<body>
+  <h1>Smart Desktop Access Admin</h1>
+  <p>Computers that have installed the client. Full control stays in the admin app. This page lists them and sends the install email.</p>
+  <div class="card">
+    <label>Companion token<br>
+      <input id="token" type="password" autocomplete="current-password">
+    </label>
+    <button id="save" type="button">Save and refresh</button>
+    <p id="error"></p>
+  </div>
+  <div id="banner"></div>
+  <div id="list"></div>
+  <script>
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+    const tokenInput = document.getElementById('token');
+    tokenInput.value = sessionStorage.getItem('sda-token') || '';
+    const seenKey = 'sda-known-ids';
+
+    function known() {
+      return new Set((localStorage.getItem(seenKey) || '').split(',').filter(Boolean));
+    }
+
+    async function load() {
+      const token = tokenInput.value.trim();
+      sessionStorage.setItem('sda-token', token);
+      const error = document.getElementById('error');
+      error.textContent = '';
+      if (!token) {
+        error.textContent = 'Paste the token printed when the companion service starts.';
+        return;
+      }
+      const response = await fetch('/api/v1/devices', { headers: { Authorization: 'Bearer ' + token } });
+      if (response.status === 401) {
+        error.textContent = 'That token was not accepted.';
+        return;
+      }
+      if (!response.ok) {
+        error.textContent = 'Could not load the list.';
+        return;
+      }
+      const body = await response.json();
+      const devices = body.devices || [];
+      const fresh = devices.filter((device) => !known().has(device.id));
+      const banner = document.getElementById('banner');
+      banner.innerHTML = fresh.length
+        ? '<div class="card">New computer: ' + fresh.map((device) => esc(device.hostname || device.id)).join(', ') +
+          ' <button id="gotit" type="button">Got it</button></div>'
+        : '';
+      const gotit = document.getElementById('gotit');
+      if (gotit) {
+        gotit.onclick = () => {
+          localStorage.setItem(seenKey, devices.map((device) => device.id).join(','));
+          load();
+        };
+      }
+      document.getElementById('list').innerHTML = devices.map((device) => {
+        const name = esc(device.hostname || device.id);
+        const state = device.online ? '<span class="online">Online</span>' : '<span class="offline">Offline</span>';
+        const badge = known().has(device.id) ? '' : ' <span class="new">New</span>';
+        return '<div class="card"><strong>' + name + '</strong>' + badge +
+          '<div>' + esc(device.email || 'No email yet') + ' · ID ' + esc(device.id) + ' · ' + state + '</div>' +
+          '<p><button data-email="' + device.id + '" type="button">Send email</button></p></div>';
+      }).join('') || '<div class="card">No computers yet.</div>';
+      document.querySelectorAll('[data-email]').forEach((button) => {
+        button.onclick = () => sendEmail(button.getAttribute('data-email'));
+      });
+    }
+
+    async function sendEmail(id) {
+      const token = tokenInput.value.trim();
+      const response = await fetch('/api/v1/devices/' + id + '/email', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: '{}'
+      });
+      const body = await response.json();
+      if (body.sent) {
+        alert('Email sent to ' + body.to);
+        return;
+      }
+      if (body.mailto) {
+        window.location.href = body.mailto;
+        return;
+      }
+      alert(body.error || 'Could not send email.');
+    }
+
+    document.getElementById('save').onclick = load;
+    if (tokenInput.value) load();
+    setInterval(() => { if (tokenInput.value.trim()) load(); }, 15000);
+  </script>
+</body>
+</html>
