@@ -6,6 +6,8 @@ import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/sda/clients_page.dart';
+import 'package:flutter_hbb/common/sda/product.dart';
 import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -90,6 +92,21 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: loadLogo(),
       ),
       buildTip(context),
+      if (isIncomingOnly)
+        Obx(() => stateGlobal.videoConnCount.value > 0
+            ? Container(
+                width: double.infinity,
+                color: const Color(0xFF0B63E5),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                child: const Text(
+                  'Session active',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+              )
+            : const SizedBox.shrink()),
+      if (isIncomingOnly) const SdaEmailCard(),
       if (!isOutgoingOnly) buildIDBoard(context),
       if (!isOutgoingOnly) buildPasswordBoard(context),
       FutureBuilder<Widget>(
@@ -179,9 +196,17 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   buildRightPane(BuildContext context) {
+    final outgoingOnly = bind.isOutgoingOnly();
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
-      child: ConnectionPage(),
+      child: outgoingOnly
+          ? const Column(
+              children: [
+                Expanded(child: SdaClientsPage()),
+                SizedBox(height: 280, child: ConnectionPage()),
+              ],
+            )
+          : ConnectionPage(),
     );
   }
 
@@ -435,7 +460,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       final isToUpdate = (isWindows || isMacOS) && bind.mainIsInstalled();
       String btnText = isToUpdate ? 'Update' : 'Download';
       GestureTapCallback onPressed = () async {
-        final Uri url = Uri.parse('https://rustdesk.com/download');
+        final Uri url = Uri.parse(sdaDownloadPageUrl());
         await launchUrl(url);
       };
       if (isToUpdate) {
@@ -532,7 +557,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
             help: 'Help',
             link:
-                'https://rustdesk.com/docs/en/client/linux/#permissions-issue',
+                sdaSourceUrl(),
             closeButton: true,
             closeOption: keyShowSelinuxHelpTip,
           ));
@@ -543,13 +568,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             "Warning", "wayland_experiment_tip", "", () async {},
             marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
             help: 'Help',
-            link: 'https://rustdesk.com/docs/en/client/linux/#x11-required'));
+            link: sdaSourceUrl()));
       } else if (bind.mainIsLoginWayland()) {
         LinuxCards.add(buildInstallCard("Warning",
             "Login screen using Wayland is not supported", "", () async {},
             marginTop: LinuxCards.isEmpty ? 20.0 : 5.0,
             help: 'Help',
-            link: 'https://rustdesk.com/docs/en/client/linux/#login-screen'));
+            link: sdaSourceUrl()));
       }
       if (LinuxCards.isNotEmpty) {
         return Column(
