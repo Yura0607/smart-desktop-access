@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Purslane Tech Pte. Ltd." "\0"
-            VALUE "FileDescription", "RustDesk Remote Desktop" "\0"
+            VALUE "CompanyName", "Smart Desktop Access" "\0"
+            VALUE "FileDescription", "Smart Desktop Access" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "rustdesk" "\0"
-            VALUE "LegalCopyright", "Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved." "\0"
-            VALUE "OriginalFilename", "rustdesk.exe" "\0"
-            VALUE "ProductName", "RustDesk" "\0"
+            VALUE "InternalName", "SmartDesktopAccess" "\0"
+            VALUE "LegalCopyright", "Based on open-source software, AGPL-3.0." "\0"
+            VALUE "OriginalFilename", "SmartDesktopAccess.exe" "\0"
+            VALUE "ProductName", "Smart Desktop Access" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

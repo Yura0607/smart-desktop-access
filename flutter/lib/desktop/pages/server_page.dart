@@ -140,7 +140,8 @@ class ConnectionManagerState extends State<ConnectionManager>
               gFFI.chatModel.showChatPage(MessageKey(client.peerId, client.id));
             });
           }
-          windowManager.setTitle(getWindowNameWithId(client.peerId));
+          windowManager.setTitle(
+              'Session active - ${getWindowNameWithId(client.peerId)}');
           gFFI.cmFileModel.updateCurrentClientId(client.id);
         }
       }
@@ -194,7 +195,21 @@ class ConnectionManagerState extends State<ConnectionManager>
               ),
             ],
           )
-        : Listener(
+        : Column(
+            children: [
+              Container(
+                width: double.infinity,
+                color: const Color(0xFF0B63E5),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                child: const Text(
+                  'Session active',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w700),
+                ),
+              ),
+              Expanded(
+                child: Listener(
             onPointerDown: pointerHandler,
             onPointerMove: pointerHandler,
             child: DesktopTab(
@@ -273,6 +288,9 @@ class ConnectionManagerState extends State<ConnectionManager>
                 },
               ),
             ),
+                ),
+              ),
+            ],
           );
   }
 

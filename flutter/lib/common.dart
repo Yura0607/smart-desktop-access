@@ -3020,8 +3020,23 @@ int versionCmp(String v1, String v2) {
   return bind.versionToNumber(v: v1) - bind.versionToNumber(v: v2);
 }
 
+String _sdaBuiltin(String key, String fallback) {
+  try {
+    final value = bind.mainGetBuildinOption(key: key);
+    if (value.isNotEmpty) {
+      return value;
+    }
+  } catch (_) {}
+  return fallback;
+}
+
+String _sdaSourceUrl() => _sdaBuiltin(
+      'source-url',
+      'https://github.com/Yura0607/smart-desktop-access',
+    );
+
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  final name = _sdaBuiltin('display-name', 'Smart Desktop Access');
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
@@ -3738,7 +3753,7 @@ Widget loadPowered(BuildContext context) {
     cursor: SystemMouseCursors.click,
     child: GestureDetector(
       onTap: () {
-        launchUrl(Uri.parse('https://rustdesk.com'));
+        launchUrl(Uri.parse(_sdaSourceUrl()));
       },
       child: Opacity(
           opacity: 0.5,
