@@ -3170,11 +3170,6 @@ String _sdaBuiltin(String key, String fallback) {
   return fallback;
 }
 
-String _sdaSourceUrl() => _sdaBuiltin(
-      'source-url',
-      'https://github.com/Yura0607/smart-desktop-access',
-    );
-
 String getWindowName({WindowType? overrideType}) {
   final name = _sdaBuiltin('display-name', 'Smart Desktop Access');
   switch (overrideType ?? kWindowType) {
@@ -3886,27 +3881,7 @@ Color? disabledTextColor(BuildContext context, bool enabled) {
 }
 
 Widget loadPowered(BuildContext context) {
-  if (bind.mainGetBuildinOption(key: "hide-powered-by-me") == 'Y') {
-    return SizedBox.shrink();
-  }
-  return MouseRegion(
-    cursor: SystemMouseCursors.click,
-    child: GestureDetector(
-      onTap: () {
-        launchUrl(Uri.parse(_sdaSourceUrl()));
-      },
-      child: Opacity(
-          opacity: 0.5,
-          child: Text(
-            translate("powered_by_me"),
-            overflow: TextOverflow.clip,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(fontSize: 9, decoration: TextDecoration.underline),
-          )),
-    ),
-  ).marginOnly(top: 6);
+  return const SizedBox.shrink();
 }
 
 const _kDefaultLogoAsset = 'assets/logo.png';

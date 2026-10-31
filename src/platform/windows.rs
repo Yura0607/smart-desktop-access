@@ -1820,6 +1820,11 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
         debug,
         "install",
     )?;
+    if !std::path::Path::new(&exe).is_file() {
+        bail!(
+            "The elevated installer exited without copying the application to {exe}. Windows may have blocked the copy"
+        );
+    }
     run_after_run_cmds(silent);
     Ok(())
 }
@@ -4186,11 +4191,18 @@ pub fn message_box(text: &str) {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<u16>>();
-    let caption = "RustDesk Output"
+    let caption = crate::product::display_name()
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<u16>>();
-    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), MB_OK) };
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_SETFOREGROUND | MB_TOPMOST,
+        )
+    };
 }
 
 pub fn alloc_console() {
