@@ -1,3 +1,4 @@
+import http.client
 import json
 import os
 import stat
@@ -95,11 +96,44 @@ class CompanionTest(unittest.TestCase):
 
     def test_install_email_has_both_platforms(self):
         text = email_text.body()
-        self.assertIn(email_text.WINDOWS_URL, text)
-        self.assertIn(email_text.MAC_ARM_URL, text)
-        self.assertIn(email_text.MAC_INTEL_URL, text)
+        self.assertIn(email_text.direct_url("windows"), text)
+        self.assertIn(email_text.direct_url("mac"), text)
+        self.assertIn(email_text.direct_url("mac-intel"), text)
+        self.assertIn("SmartDesktopAccess-windows-x64.exe", text)
+        self.assertNotIn("github.com", text)
         self.assertNotIn("RustDesk", text)
         self.assertNotIn("129.213.112.22", text)
+
+    def test_invite_redirect_uses_download_base(self):
+        os.environ["SDA_DOWNLOAD_BASE"] = "https://downloads.example/files/"
+        try:
+            self.assertEqual(
+                email_text.direct_url("windows"),
+                "https://downloads.example/files/SmartDesktopAccess-windows-x64.exe",
+            )
+            self.assertEqual(
+                email_text.direct_url("mac"),
+                "https://downloads.example/files/SmartDesktopAccess-macos-arm64.dmg",
+            )
+            self.assertEqual(
+                email_text.direct_url("mac-intel"),
+                "https://downloads.example/files/SmartDesktopAccess-macos-x64.dmg",
+            )
+            host, port = self.server.server_address
+            for method in ("GET", "HEAD"):
+                conn = http.client.HTTPConnection(host, port, timeout=5)
+                conn.request(method, "/d/ABC234/mac")
+                response = conn.getresponse()
+                body = response.read()
+                self.assertEqual(response.status, 302)
+                self.assertEqual(
+                    response.getheader("Location"),
+                    "https://downloads.example/files/SmartDesktopAccess-macos-arm64.dmg",
+                )
+                self.assertEqual(body, b"")
+                conn.close()
+        finally:
+            os.environ.pop("SDA_DOWNLOAD_BASE", None)
 
     def test_alias_survives_reregistration(self):
         status, created = self.request(

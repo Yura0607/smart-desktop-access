@@ -377,6 +377,19 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
         def do_OPTIONS(self) -> None:  # noqa: N802
             self._send(204, {})
 
+        def do_HEAD(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            download = _download_target(path)
+            if not download:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            self.send_response(302)
+            self.send_header("Location", download)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
         def do_GET(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
             if path in ("/", "/admin"):

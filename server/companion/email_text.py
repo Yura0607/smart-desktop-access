@@ -1,32 +1,41 @@
 """English installation email for non-technical customers.
 
 Keep this wording in step with flutter/lib/common/sda/email_text.dart.
-The download names are the stable GitHub release asset names.
+Installer files are served from SDA_DOWNLOAD_BASE.
 """
 
-SOURCE_URL = "https://github.com/Yura0607/smart-desktop-access"
-DOWNLOAD_PAGE_URL = SOURCE_URL + "/releases/latest"
-WINDOWS_URL = DOWNLOAD_PAGE_URL + "/download/SmartDesktopAccess-windows-x64.exe"
-MAC_ARM_URL = DOWNLOAD_PAGE_URL + "/download/SmartDesktopAccess-macos-arm64.dmg"
-MAC_INTEL_URL = DOWNLOAD_PAGE_URL + "/download/SmartDesktopAccess-macos-x64.dmg"
+import os
+
+DEFAULT_DOWNLOAD_BASE = "https://smartdesktopaccess.duckdns.org/downloads"
+WINDOWS_NAME = "SmartDesktopAccess-windows-x64.exe"
+MAC_ARM_NAME = "SmartDesktopAccess-macos-arm64.dmg"
+MAC_INTEL_NAME = "SmartDesktopAccess-macos-x64.dmg"
 PUBLIC_COMPANION = "https://smartdesktopaccess.duckdns.org/companion"
 
 SUBJECT = "Your Smart Desktop Access program"
 
+_FILES = {
+    "windows": WINDOWS_NAME,
+    "mac": MAC_ARM_NAME,
+    "mac-intel": MAC_INTEL_NAME,
+}
+
+
+def download_base() -> str:
+    raw = os.environ.get("SDA_DOWNLOAD_BASE", "").strip().rstrip("/")
+    return raw or DEFAULT_DOWNLOAD_BASE
+
 
 def direct_url(kind: str) -> str:
-    if kind == "windows":
-        return WINDOWS_URL
-    if kind == "mac":
-        return MAC_ARM_URL
-    if kind == "mac-intel":
-        return MAC_INTEL_URL
-    return ""
+    name = _FILES.get(kind, "")
+    if not name:
+        return ""
+    return download_base() + "/" + name
 
 
 def download_links(invite: str = "") -> tuple[str, str, str]:
     if not invite:
-        return WINDOWS_URL, MAC_ARM_URL, MAC_INTEL_URL
+        return direct_url("windows"), direct_url("mac"), direct_url("mac-intel")
     base = PUBLIC_COMPANION + "/d/" + invite
     return base + "/windows", base + "/mac", base + "/mac-intel"
 
@@ -62,7 +71,7 @@ Then follow the same Mac steps above.
 
 You only do this once. If something does not work, reply to this email.
 
-All downloads are also listed here: {DOWNLOAD_PAGE_URL}
+All downloads are also listed here: {download_base()}
 """
 
 
