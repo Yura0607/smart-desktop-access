@@ -573,10 +573,9 @@ class _CmHeaderState extends State<_CmHeader>
             ),
           ),
           Offstage(
-            offstage: !client.authorized ||
-                (client.type_() != ClientType.remote &&
-                    client.type_() != ClientType.file &&
-                    client.type_() != ClientType.camera),
+            offstage: !(client.type_() == ClientType.remote ||
+                client.type_() == ClientType.camera ||
+                (client.authorized && client.type_() == ClientType.file)),
             child: IconButton(
               onPressed: () => checkClickTime(client.id, () {
                 if (client.type_() == ClientType.file) {
@@ -992,39 +991,7 @@ class _CmControlPanel extends StatelessWidget {
             ],
           ),
         ),
-        Offstage(
-          offstage: !client.incomingVoiceCall,
-          child: Row(
-            children: [
-              Expanded(
-                child: buildButton(context,
-                    color: MyTheme.accent,
-                    onClick: () => handleVoiceCall(true),
-                    icon: Icon(
-                      Icons.call_rounded,
-                      color: Colors.white,
-                      size: 14,
-                    ),
-                    text: "Accept",
-                    textColor: Colors.white),
-              ),
-              Expanded(
-                child: buildButton(
-                  context,
-                  color: Colors.red,
-                  onClick: () => handleVoiceCall(false),
-                  icon: Icon(
-                    Icons.phone_disabled_rounded,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                  text: "Dismiss",
-                  textColor: Colors.white,
-                ),
-              )
-            ],
-          ),
-        ),
+        incomingVoiceCall(context),
         Offstage(
           offstage: !client.fromSwitch,
           child: buildButton(context,
@@ -1099,6 +1066,20 @@ class _CmControlPanel extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
+        incomingVoiceCall(context),
+        if (client.type_() == ClientType.remote ||
+            client.type_() == ClientType.camera)
+          buildButton(
+            context,
+            color: Colors.transparent,
+            border: Border.all(color: Colors.grey),
+            onClick: () {
+              gFFI.chatModel
+                  .toggleCMChatPage(MessageKey(client.peerId, client.id));
+            },
+            text: 'Chat',
+            textColor: null,
+          ),
         Offstage(
           offstage: !showElevation || !showAccept,
           child: buildButton(context, color: Colors.green[700], onClick: () {
@@ -1236,6 +1217,42 @@ class _CmControlPanel extends StatelessWidget {
 
   void handleSwitchBack(BuildContext context) {
     bind.cmSwitchBack(connId: client.id);
+  }
+
+  Widget incomingVoiceCall(BuildContext context) {
+    return Offstage(
+      offstage: !client.incomingVoiceCall,
+      child: Row(
+        children: [
+          Expanded(
+            child: buildButton(context,
+                color: MyTheme.accent,
+                onClick: () => handleVoiceCall(true),
+                icon: Icon(
+                  Icons.call_rounded,
+                  color: Colors.white,
+                  size: 14,
+                ),
+                text: "Accept",
+                textColor: Colors.white),
+          ),
+          Expanded(
+            child: buildButton(
+              context,
+              color: Colors.red,
+              onClick: () => handleVoiceCall(false),
+              icon: Icon(
+                Icons.phone_disabled_rounded,
+                color: Colors.white,
+                size: 14,
+              ),
+              text: "Dismiss",
+              textColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void handleVoiceCall(bool accept) {

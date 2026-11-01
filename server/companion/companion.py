@@ -122,6 +122,12 @@ class Store:
             password = str(payload.get("password") or current.get("password") or "")
             # The client must not replace a name the admin set.
             alias = str(current.get("alias") or "").strip()
+            if "client_name" in payload:
+                client_name = str(payload.get("client_name") or "").strip()
+                if len(client_name) > 80 or any(ch in client_name for ch in "\r\n\x00"):
+                    raise ValueError("invalid client name")
+            else:
+                client_name = str(current.get("client_name") or "").strip()
             invite = str(current.get("invite") or "").strip()
             note = str(current.get("note") or "")
             linked = None if invite else self._pop_pending_locked(data, email)
@@ -142,6 +148,8 @@ class Store:
             }
             if alias:
                 record["alias"] = alias
+            if client_name:
+                record["client_name"] = client_name
             if invite:
                 record["invite"] = invite
             if note:
@@ -166,7 +174,7 @@ class Store:
         rows.sort(
             key=lambda row: (
                 not row["online"],
-                (row.get("alias") or row.get("hostname") or row["id"]).lower(),
+                (row.get("alias") or row.get("client_name") or row.get("hostname") or row["id"]).lower(),
             )
         )
         return rows

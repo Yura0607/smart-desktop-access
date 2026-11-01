@@ -135,6 +135,66 @@ class CompanionTest(unittest.TestCase):
         finally:
             os.environ.pop("SDA_DOWNLOAD_BASE", None)
 
+    def test_client_name_does_not_replace_alias(self):
+        status, created = self._register()
+        self.assertEqual(status, 200)
+        status, named = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "password": "pw",
+                "device_token": created["device_token"],
+                "client_name": "Front desk PC",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["devices"][0]["client_name"], "Front desk PC")
+        status, renamed = self.request(
+            "PATCH",
+            "/api/v1/devices/123456789",
+            {"alias": "Owner name"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed["alias"], "Owner name")
+        status, again = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "password": "pw",
+                "device_token": created["device_token"],
+                "client_name": "Changed by the computer",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        device = listed["devices"][0]
+        self.assertEqual(device["alias"], "Owner name")
+        self.assertEqual(device["client_name"], "Changed by the computer")
+        status, rejected = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "password": "pw",
+                "device_token": created["device_token"],
+                "client_name": "x" * 81,
+            },
+        )
+        self.assertEqual(status, 400)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["devices"][0]["client_name"], "Changed by the computer")
+        self.assertEqual(listed["devices"][0]["alias"], "Owner name")
+
     def test_alias_survives_reregistration(self):
         status, created = self.request(
             "POST",

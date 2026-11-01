@@ -112,6 +112,11 @@ pub fn apply() {
         overwrite.insert("allow-insecure-tls-fallback".to_owned(), "N".to_owned());
         // The manager sends and receives files. Do not leave this at No.
         overwrite.insert("enable-file-transfer".to_owned(), "Y".to_owned());
+        // Voice call uses the audio permission. The consent panel already
+        // shows Accept when a call comes in. Camera is the upstream view-camera
+        // session, not a separate video call.
+        overwrite.insert("enable-audio".to_owned(), "Y".to_owned());
+        overwrite.insert("enable-camera".to_owned(), "Y".to_owned());
     }
     drop(overwrite);
 

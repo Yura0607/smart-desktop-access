@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/sda/email_text.dart';
+import 'package:flutter_hbb/common/sda/local_hostname.dart';
 import 'package:flutter_hbb/common/sda/notes_dialog.dart';
 import 'package:flutter_hbb/common/sda/product.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -25,11 +26,19 @@ class SdaClient {
   String get password => '${json['password'] ?? ''}';
   String get platform => '${json['platform'] ?? ''}';
   String get alias => '${json['alias'] ?? ''}'.trim();
+  String get clientName => '${json['client_name'] ?? ''}'.trim();
   String get invite => '${json['invite'] ?? json['id'] ?? ''}'.trim();
   bool get pending => json['pending'] == true;
   bool get online => json['online'] == true;
-  String get label =>
-      alias.isNotEmpty ? alias : (hostname.isEmpty ? id : hostname);
+  String get label {
+    if (alias.isNotEmpty) {
+      return alias;
+    }
+    if (clientName.isNotEmpty) {
+      return clientName;
+    }
+    return hostname.isEmpty ? id : hostname;
+  }
 }
 
 bool _validEmail(String value) {
@@ -170,6 +179,15 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
       context,
       client.id,
       isFileTransfer: true,
+      password: client.password,
+    );
+  }
+
+  Future<void> _viewCamera(SdaClient client) async {
+    await connect(
+      context,
+      client.id,
+      isViewCamera: true,
       password: client.password,
     );
   }
@@ -502,7 +520,7 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(client.label),
-                              if (client.alias.isNotEmpty &&
+                              if (client.label != client.hostname &&
                                   client.hostname.isNotEmpty)
                                 Text(
                                   client.hostname,
@@ -550,6 +568,11 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                                 TextButton(
                                   onPressed: () => _transferFiles(client),
                                   child: const Text('Files'),
+                                ),
+                              if (!client.pending)
+                                TextButton(
+                                  onPressed: () => _viewCamera(client),
+                                  child: const Text('Camera'),
                                 ),
                               if (!client.pending)
                                 TextButton(
@@ -626,23 +649,29 @@ class SdaEmailCard extends StatefulWidget {
 
 class _SdaEmailCardState extends State<SdaEmailCard> {
   final _controller = TextEditingController();
+  final _name = TextEditingController();
   static const _key = 'sda-email';
+  static const _nameKey = 'sda-client-name';
 
   @override
   void initState() {
     super.initState();
     _controller.text = bind.mainGetOptionSync(key: _key);
+    final savedName = bind.mainGetOptionSync(key: _nameKey).trim();
+    _name.text = savedName.isEmpty ? localHostname() : savedName;
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _name.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final email = _controller.text.trim();
     await bind.mainSetOption(key: _key, value: email);
+    await bind.mainSetOption(key: _nameKey, value: _name.text.trim());
     if (mounted) {
       setState(() {});
     }
@@ -675,6 +704,17 @@ class _SdaEmailCardState extends State<SdaEmailCard> {
           const SizedBox(height: 4),
           const Text(
             'Type the email address this computer should be listed under, then click Save.',
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _name,
+            maxLength: 80,
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(),
+              counterText: '',
+              labelText: 'Name this computer',
+            ),
           ),
           const SizedBox(height: 8),
           TextField(

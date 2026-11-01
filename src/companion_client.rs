@@ -15,6 +15,7 @@ use std::{
 const PASSWORD_FILE: &str = "sda-access-password";
 const TOKEN_FILE: &str = "sda-device-token";
 const EMAIL_OPTION: &str = "sda-email";
+const NAME_OPTION: &str = "sda-client-name";
 
 pub fn start() {
     if crate::product::is_admin() || hbb_common::config::is_outgoing_only() {
@@ -47,6 +48,7 @@ async fn register_once() -> Result<(), String> {
     let body = serde_json::json!({
         "id": id,
         "hostname": machine_name(),
+        "client_name": client_name(),
         "email": email,
         "password": password,
         "platform": std::env::consts::OS,
@@ -125,6 +127,23 @@ fn write_state(name: &str, value: &str) -> Result<(), String> {
     file.write_all(value.as_bytes())
         .map_err(|err| err.to_string())?;
     Ok(())
+}
+
+fn client_name() -> String {
+    let custom = Config::get_option(NAME_OPTION);
+    let custom = custom.trim();
+    if !custom.is_empty() {
+        return sanitize_name(custom);
+    }
+    sanitize_name(&machine_name())
+}
+
+fn sanitize_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| *ch != '\n' && *ch != '\r' && *ch != '\0')
+        .take(80)
+        .collect()
 }
 
 fn machine_name() -> String {

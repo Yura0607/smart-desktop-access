@@ -451,6 +451,9 @@ class ChatModel with ChangeNotifier {
     }
     insertMessage(messagekey,
         ChatMessage(text: text, user: chatUser, createdAt: DateTime.now()));
+    if (desktopType == DesktopType.cm) {
+      await showChatPage(messagekey);
+    }
     if (id == clientModeID || _currentKey.peerId.isEmpty) {
       // client or invalid
       _currentKey = messagekey;
