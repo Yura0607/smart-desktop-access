@@ -1,9 +1,9 @@
-//! Smart Desktop Access identity and the built-in ID/relay server.
+//! Smart Desktop Access identity and the built-in ID/relay and API servers.
 //!
-//! Change the server host, public key, or companion URL here. Both the client
-//! and the admin build read this module; `SDA_VARIANT=admin` selects the
-//! outgoing-only manager, and any other value (including unset) is the
-//! incoming-only client.
+//! Change the server host, public key, API server, or companion URL here. Both
+//! the client and the admin build read this module; `SDA_VARIANT=admin`
+//! selects the outgoing-only manager, and any other value (including unset) is
+//! the incoming-only client.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -13,6 +13,8 @@ pub const SERVER_HOST: &str = "129.213.112.22";
 pub const SERVER_PUBLIC_KEY: &str = "IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc=";
 /// Companion API (client list and email). Same VM, TCP 21120.
 pub const COMPANION_URL: &str = "http://129.213.112.22:21120";
+/// Account login (`lejianwen/rustdesk-api`). Same VM, TCP 21114.
+pub const API_SERVER: &str = "http://129.213.112.22:21114";
 pub const SOURCE_URL: &str = "https://github.com/Yura0607/smart-desktop-access";
 pub const DOWNLOAD_PAGE_URL: &str =
     "https://github.com/Yura0607/smart-desktop-access/releases/latest";
@@ -76,6 +78,7 @@ pub fn apply() {
     let mut overwrite = hbb_common::config::OVERWRITE_SETTINGS.write().unwrap();
     overwrite.insert("custom-rendezvous-server".to_owned(), SERVER_HOST.to_owned());
     overwrite.insert("key".to_owned(), SERVER_PUBLIC_KEY.to_owned());
+    overwrite.insert("api-server".to_owned(), API_SERVER.to_owned());
     if !is_admin() {
         // Unattended: accept the permanent password and do not ask anyone to click.
         overwrite.insert("approve-mode".to_owned(), "password".to_owned());
@@ -92,8 +95,6 @@ pub fn apply() {
     if !is_admin() {
         builtin.insert("hide-security-settings".to_owned(), "Y".to_owned());
     }
-    // Do not call the public RustDesk API or port 21114 on the ID server.
-    builtin.insert("register-device".to_owned(), "N".to_owned());
     builtin.insert("companion-url".to_owned(), COMPANION_URL.to_owned());
     builtin.insert("download-page-url".to_owned(), DOWNLOAD_PAGE_URL.to_owned());
     builtin.insert("source-url".to_owned(), SOURCE_URL.to_owned());
@@ -116,6 +117,7 @@ mod tests {
         assert!(!CLIENT_INSTALL_NAME.contains(' '));
         assert!(!ADMIN_INSTALL_NAME.contains(' '));
         assert!(SOURCE_URL.contains("Yura0607/smart-desktop-access"));
+        assert_eq!(API_SERVER, "http://129.213.112.22:21114");
         assert!(install_name() == CLIENT_INSTALL_NAME || install_name() == ADMIN_INSTALL_NAME);
         assert_ne!(display_name(), "RustDesk");
     }
