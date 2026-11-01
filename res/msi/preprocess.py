@@ -93,7 +93,7 @@ def make_parser():
         "-m",
         "--manufacturer",
         type=str,
-        default="Smart Desktop Access",
+        default="Yuriy",
         help="The app manufacturer.",
     )
     return parser

@@ -11,4 +11,4 @@ PRODUCT_NAME = SmartDesktopAccess
 PRODUCT_BUNDLE_IDENTIFIER = com.smartdesktopaccess.client
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0
+PRODUCT_COPYRIGHT = Copyright © 2026 Yuriy. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0

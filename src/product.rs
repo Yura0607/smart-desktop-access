@@ -18,12 +18,11 @@ pub const API_SERVER: &str = "https://smartdesktopaccess.duckdns.org";
 /// Companion API. Caddy strips the `/companion` prefix and proxies to the
 /// companion process.
 pub const COMPANION_URL: &str = "https://smartdesktopaccess.duckdns.org/companion";
-/// Shown as the Windows publisher / company. Not the install folder name.
-pub const PUBLISHER: &str = "Smart Desktop Access";
-pub const LEGAL_COPYRIGHT: &str = "Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0";
+/// Windows publisher / company and Mac vendor. Not the install folder name.
+pub const PUBLISHER: &str = "Yuriy";
+pub const LEGAL_COPYRIGHT: &str = "Copyright © 2026 Yuriy. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0";
 pub const SOURCE_URL: &str = "https://github.com/Yura0607/smart-desktop-access";
-pub const DOWNLOAD_PAGE_URL: &str =
-    "https://github.com/Yura0607/smart-desktop-access/releases/latest";
+pub const DOWNLOAD_PAGE_URL: &str = "https://smartdesktopaccess.duckdns.org/downloads";
 
 /// Install name: executable, service, and bundle folder. No spaces; the
 /// Windows installer rejects names that are not safe to drop into a command.
@@ -144,6 +143,7 @@ mod tests {
             SERVER_PUBLIC_KEY,
             "IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc="
         );
+        assert_eq!(PUBLISHER, "Yuriy");
         assert_eq!(CLIENT_DISPLAY_NAME, "Smart Desktop Access");
         assert_eq!(ADMIN_DISPLAY_NAME, "Smart Desktop Access Admin");
         assert!(!CLIENT_INSTALL_NAME.contains(' '));

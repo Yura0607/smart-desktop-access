@@ -90,6 +90,8 @@ hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old 
 
 `PATCH /api/v1/devices/<id>` — same header, body `{"alias": "Front desk"}`. Empty alias clears the name. A later client registration does not replace it.
 
+`POST /api/v1/devices/<id>/deactivate` — same header. Marks the computer so its next check-in uninstalls the program. The list shows it as uninstalling until the computer confirms. `POST /api/v1/devices/<id>/deactivated-ack` with the device token removes it. `DELETE /api/v1/devices/<id>` forgets it without an uninstall. Notes for a forgotten computer move to `notes-archive.json` in the data directory.
+
 `POST /api/v1/clients` — same header, body `{"name", "email", "note"}`. Creates a pending record and a short invite code. `POST /api/v1/clients/<invite>/email` sends the install mail. The download links are `https://smartdesktopaccess.duckdns.org/companion/d/<invite>/windows` (and `mac`, `mac-intel`) and redirect to the client installers under `SDA_DOWNLOAD_BASE` (default `https://smartdesktopaccess.duckdns.org/downloads`). `HEAD` on those paths returns the same redirect. The person does not type the code. When the installed client registers with the same email address, ignoring capitals, the pending record becomes that device and keeps the name. `DELETE /api/v1/clients/<invite>` removes a pending record.
 
 `GET /api/v1/devices/<id>/notes` and `PUT /api/v1/devices/<id>/notes` — same header. `<id>` is a device id or a pending invite. PUT body is `{"credentials": "..."}` (at most 10,000 characters). The value is a Fernet token in `notes.json`. The key is `notes.key` in the data directory, created on first start, mode 600. It is not written into `devices.json` and it is not logged.

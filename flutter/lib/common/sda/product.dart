@@ -3,18 +3,17 @@ import 'package:flutter_hbb/models/platform_model.dart';
 /// Mirrors `src/product.rs`. The running app reads the built-in options that
 /// `product::apply()` writes; these constants are the fallback.
 const kSdaSourceUrl = 'https://github.com/Yura0607/smart-desktop-access';
-const kSdaDownloadPageUrl =
-    'https://github.com/Yura0607/smart-desktop-access/releases/latest';
+const kSdaDownloadPageUrl = 'https://smartdesktopaccess.duckdns.org/downloads';
 const kSdaCompanionUrl = 'https://smartdesktopaccess.duckdns.org/companion';
 const kSdaCopyright =
-    'Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0';
+    'Copyright © 2026 Yuriy. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0';
 
 const kSdaWindowsDownloadUrl =
-    'https://github.com/Yura0607/smart-desktop-access/releases/latest/download/SmartDesktopAccess-windows-x64.exe';
+    'https://smartdesktopaccess.duckdns.org/downloads/SmartDesktopAccess-windows-x64.exe';
 const kSdaMacArmDownloadUrl =
-    'https://github.com/Yura0607/smart-desktop-access/releases/latest/download/SmartDesktopAccess-macos-arm64.dmg';
+    'https://smartdesktopaccess.duckdns.org/downloads/SmartDesktopAccess-macos-arm64.dmg';
 const kSdaMacIntelDownloadUrl =
-    'https://github.com/Yura0607/smart-desktop-access/releases/latest/download/SmartDesktopAccess-macos-x64.dmg';
+    'https://smartdesktopaccess.duckdns.org/downloads/SmartDesktopAccess-macos-x64.dmg';
 
 String _builtin(String key, String fallback) {
   try {

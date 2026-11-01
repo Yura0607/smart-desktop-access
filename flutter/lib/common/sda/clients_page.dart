@@ -29,6 +29,7 @@ class SdaClient {
   String get clientName => '${json['client_name'] ?? ''}'.trim();
   String get invite => '${json['invite'] ?? json['id'] ?? ''}'.trim();
   bool get pending => json['pending'] == true;
+  bool get deactivated => json['deactivated'] == true;
   bool get online => json['online'] == true;
   String get label {
     if (alias.isNotEmpty) {
@@ -398,6 +399,83 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     }
   }
 
+  Future<bool> _confirm(String title, String message) async {
+    final answer = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    return answer == true;
+  }
+
+  Future<void> _deactivate(SdaClient client) async {
+    final confirmed = await _confirm(
+      'Deactivate ${client.label}',
+      'Smart Desktop Access will be uninstalled from that computer the next time it is turned on and connected. This cannot be undone from here.',
+    );
+    if (!confirmed) {
+      return;
+    }
+    final token = bind.mainGetLocalOption(key: _tokenKey);
+    try {
+      final response = await http.post(
+        Uri.parse(sdaCompanionApi('/api/v1/devices/${client.id}/deactivate')),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+      );
+      if (response.statusCode == 200) {
+        await _refresh();
+        return;
+      }
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not deactivate this computer.'),
+      ));
+    }
+  }
+
+  Future<void> _forget(SdaClient client) async {
+    final confirmed = await _confirm(
+      'Remove ${client.label}',
+      'This only removes the computer from your list. The program stays installed on that computer.',
+    );
+    if (!confirmed) {
+      return;
+    }
+    final token = bind.mainGetLocalOption(key: _tokenKey);
+    try {
+      final response = await http.delete(
+        Uri.parse(sdaCompanionApi('/api/v1/devices/${client.id}')),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        await _refresh();
+        return;
+      }
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not remove this computer.'),
+      ));
+    }
+  }
+
   Future<void> _deletePending(SdaClient client) async {
     final token = bind.mainGetLocalOption(key: _tokenKey);
     try {
@@ -458,7 +536,10 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
         }
       }
     } catch (_) {}
-    final mailto = installMailto(client.email);
+    final mailto = installMailto(
+      client.email,
+      invite: '${client.json['invite'] ?? ''}'.trim(),
+    );
     final opened = await launchUrl(Uri.parse(mailto));
     if (!opened && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -535,6 +616,7 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                                     if (client.email.isNotEmpty) client.email,
                                   ].join(' · ')
                                 : [
+                                    if (client.deactivated) 'Uninstalling…',
                                     if (client.email.isNotEmpty) client.email,
                                     'ID ${client.id}',
                                     client.online ? 'Online' : 'Offline',
@@ -591,6 +673,19 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                                 TextButton(
                                   onPressed: () => _rename(client),
                                   child: const Text('Rename'),
+                                ),
+                              if (!client.pending && !client.deactivated)
+                                TextButton(
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: Colors.red,
+                                  ),
+                                  onPressed: () => _deactivate(client),
+                                  child: const Text('Deactivate'),
+                                ),
+                              if (!client.pending)
+                                TextButton(
+                                  onPressed: () => _forget(client),
+                                  child: const Text('Remove from list'),
                                 ),
                               if (client.pending)
                                 TextButton(

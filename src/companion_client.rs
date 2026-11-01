@@ -27,6 +27,9 @@ pub fn start() {
             .unwrap_or_else(Instant::now);
         loop {
             if let Err(err) = register_once().await {
+                if err == "uninstalling" {
+                    break;
+                }
                 if err != "ID is not ready" && failure_log.elapsed() >= Duration::from_secs(600) {
                     log::warn!("Companion registration failed: {err}");
                     failure_log = Instant::now();
@@ -57,6 +60,7 @@ async fn register_once() -> Result<(), String> {
     });
     let url = crate::product::companion_api("api/v1/devices");
     let client = reqwest::Client::builder()
+        .https_only(true)
         .timeout(Duration::from_secs(20))
         .build()
         .map_err(|err| err.to_string())?;
@@ -77,8 +81,49 @@ async fn register_once() -> Result<(), String> {
                 let _ = write_state(TOKEN_FILE, token);
             }
         }
+        if value.get("deactivated").and_then(|v| v.as_bool()) == Some(true) {
+            let token = read_state(TOKEN_FILE).unwrap_or_default();
+            acknowledge_deactivated(&client, &id, &token).await?;
+            schedule_self_uninstall();
+            return Err("uninstalling".to_owned());
+        }
     }
     Ok(())
+}
+
+async fn acknowledge_deactivated(
+    client: &reqwest::Client,
+    id: &str,
+    token: &str,
+) -> Result<(), String> {
+    if token.is_empty() {
+        return Err("device token missing".to_owned());
+    }
+    let url = crate::product::companion_api(&format!("api/v1/devices/{id}/deactivated-ack"));
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({ "device_token": token }))
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    Ok(())
+}
+
+fn schedule_self_uninstall() {
+    std::thread::spawn(|| {
+        std::thread::sleep(Duration::from_secs(2));
+        #[cfg(windows)]
+        {
+            if let Err(err) = crate::platform::windows::silent_self_uninstall() {
+                log::warn!("Silent uninstall failed: {err}");
+            }
+        }
+        #[cfg(target_os = "macos")]
+        crate::platform::macos::silent_self_uninstall();
+    });
 }
 
 fn ensure_password() -> Result<String, String> {

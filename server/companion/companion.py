@@ -154,6 +154,10 @@ class Store:
                 record["invite"] = invite
             if note:
                 record["note"] = note
+            if current.get("deactivated"):
+                record["deactivated"] = True
+                if current.get("deactivated_at"):
+                    record["deactivated_at"] = current["deactivated_at"]
             devices[device_id] = record
             self._write(data)
             result = dict(record)
@@ -236,6 +240,47 @@ class Store:
         rows = [dict(row) for row in pending.values()]
         rows.sort(key=lambda row: int(row.get("created") or 0))
         return rows
+
+    def deactivate(self, device_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._read()
+            devices = data.get("devices", {})
+            current = devices.get(device_id)
+            if not isinstance(current, dict):
+                return None
+            current["deactivated"] = True
+            current["deactivated_at"] = now()
+            devices[device_id] = current
+            self._write(data)
+            row = dict(current)
+            row.pop("device_token", None)
+            return row
+
+    def forget(self, device_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._read()
+            devices = data.get("devices", {})
+            current = devices.pop(device_id, None)
+            if not isinstance(current, dict):
+                return None
+            self._write(data)
+            return dict(current)
+
+    def ack_deactivated(self, device_id: str, token: str) -> str:
+        with self._lock:
+            data = self._read()
+            devices = data.get("devices", {})
+            current = devices.get(device_id)
+            if not isinstance(current, dict):
+                return "missing"
+            if not current.get("deactivated"):
+                return "active"
+            expected = str(current.get("device_token") or "")
+            if not expected or token != expected:
+                return "denied"
+            devices.pop(device_id, None)
+            self._write(data)
+            return "ok"
 
     def delete_pending(self, invite: str) -> bool:
         with self._lock:
@@ -480,7 +525,10 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                         client_notes_store.reassign(linked_from, str(saved.get("id") or ""))
                     except Exception as err:
                         print("notes reassign failed:", type(err).__name__)
-                self._send(200, {"ok": True, "device_token": saved["device_token"]})
+                body = {"ok": True, "device_token": saved["device_token"]}
+                if saved.get("deactivated"):
+                    body["deactivated"] = True
+                self._send(200, body)
                 return
             if path.startswith("/api/v1/devices/") and path.endswith("/email"):
                 if self._too_fast("admin"):
@@ -555,6 +603,12 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 self._send(200, letter)
                 return
             parts = _device_parts(path)
+            if parts is not None and parts[1:] == ["deactivate"]:
+                self._deactivate(parts[0])
+                return
+            if parts is not None and parts[1:] == ["deactivated-ack"]:
+                self._ack_deactivated(parts[0], payload)
+                return
             if parts is not None and parts[1:] == ["log"]:
                 self._add_log(parts[0], payload)
                 return
@@ -581,6 +635,11 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             parts = _device_parts(path)
             if parts is not None and len(parts) == 3 and parts[1] == "log":
                 self._remove_log(parts[0], parts[2])
+                return
+            device_prefix = "/api/v1/devices/"
+            device_id = path[len(device_prefix) :].strip("/") if path.startswith(device_prefix) else ""
+            if device_id and "/" not in device_id:
+                self._forget_device(device_id)
                 return
             prefix = "/api/v1/clients/"
             if not path.startswith(prefix) or "/" in path[len(prefix) :].strip("/"):
@@ -641,6 +700,41 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 self._send(404, {"error": "unknown device"})
                 return False
             return True
+
+        def _deactivate(self, device_id: str) -> None:
+            if not self._admin():
+                return
+            saved = store.deactivate(device_id)
+            if saved is None:
+                self._send(404, {"error": "unknown device"})
+                return
+            self._send(200, {"ok": True, "deactivated": True})
+
+        def _forget_device(self, device_id: str) -> None:
+            if not self._admin():
+                return
+            removed = store.forget(device_id)
+            if removed is None:
+                self._send(404, {"error": "unknown device"})
+                return
+            client_notes_store.archive(device_id)
+            self._send(200, {"ok": True})
+
+        def _ack_deactivated(self, device_id: str, payload: dict[str, Any]) -> None:
+            if self._too_fast("register"):
+                return
+            result = store.ack_deactivated(device_id, str(payload.get("device_token") or ""))
+            if result == "missing":
+                self._send(404, {"error": "unknown device"})
+                return
+            if result == "active":
+                self._send(409, {"error": "not deactivated"})
+                return
+            if result != "ok":
+                self._send(401, {"error": "device token"})
+                return
+            client_notes_store.archive(device_id)
+            self._send(200, {"ok": True})
 
         def _read_notes(self, owner: str) -> None:
             if not self._admin() or not self._known(owner):

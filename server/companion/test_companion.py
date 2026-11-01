@@ -135,6 +135,75 @@ class CompanionTest(unittest.TestCase):
         finally:
             os.environ.pop("SDA_DOWNLOAD_BASE", None)
 
+    def test_deactivate_uninstalls_only_after_the_device_confirms(self):
+        secret = "sda-credential-deactivate-me"
+        status, created = self._register()
+        self.assertEqual(status, 200)
+        self.assertNotIn("deactivated", created)
+        status, denied = self.request("POST", "/api/v1/devices/123456789/deactivate")
+        self.assertEqual(status, 401)
+        self.request(
+            "PUT",
+            "/api/v1/devices/123456789/notes",
+            {"credentials": secret},
+            token="test-token",
+        )
+        status, marked = self.request(
+            "POST",
+            "/api/v1/devices/123456789/deactivate",
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertTrue(listed["devices"][0]["deactivated"])
+        status, again = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "password": "pw",
+                "device_token": created["device_token"],
+                "deactivated": False,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(again["deactivated"])
+        status, wrong = self.request(
+            "POST",
+            "/api/v1/devices/123456789/deactivated-ack",
+            {"device_token": "nope"},
+        )
+        self.assertEqual(status, 401)
+        status, other = self._register(device_id="222222222", email="other@example.com")
+        self.assertEqual(status, 200)
+        status, early = self.request(
+            "POST",
+            "/api/v1/devices/222222222/deactivated-ack",
+            {"device_token": other["device_token"]},
+        )
+        self.assertEqual(status, 409)
+        status, acked = self.request(
+            "POST",
+            "/api/v1/devices/123456789/deactivated-ack",
+            {"device_token": created["device_token"]},
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual([row["id"] for row in listed["devices"]], ["222222222"])
+        archive = (Path(self.tmp.name) / "notes-archive.json").read_text(encoding="utf-8")
+        self.assertNotIn(secret, archive)
+        self.assertIn("123456789", json.loads(archive)["entries"][0]["owner"])
+        status, removed = self.request(
+            "DELETE",
+            "/api/v1/devices/222222222",
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["devices"], [])
+
     def test_client_name_does_not_replace_alias(self):
         status, created = self._register()
         self.assertEqual(status, 200)

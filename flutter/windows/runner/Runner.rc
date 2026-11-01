@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Smart Desktop Access" "\0"
+            VALUE "CompanyName", "Yuriy" "\0"
             VALUE "FileDescription", "Smart Desktop Access" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "SmartDesktopAccess" "\0"
-            VALUE "LegalCopyright", "Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0" "\0"
+            VALUE "LegalCopyright", "Copyright © 2026 Yuriy. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0" "\0"
             VALUE "OriginalFilename", "SmartDesktopAccess.exe" "\0"
             VALUE "ProductName", "Smart Desktop Access" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

@@ -476,6 +476,33 @@ pub fn write_plists() -> ResultType<()> {
     Ok(())
 }
 
+pub fn silent_self_uninstall() {
+    set_login_autostart(false);
+    let full = crate::get_full_name();
+    let app = crate::get_app_name();
+    let plists = [
+        format!("/Library/LaunchDaemons/{full}_service.plist"),
+        format!("/Library/LaunchAgents/{full}_server.plist"),
+        format!("/Library/LaunchDaemons/com.carriez.{app}_service.plist"),
+        format!("/Library/LaunchAgents/com.carriez.{app}_server.plist"),
+    ];
+    for plist in &plists {
+        let _ = std::process::Command::new("launchctl")
+            .args(["bootout", "system", plist])
+            .status();
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", "-w", plist])
+            .status();
+        let _ = std::fs::remove_file(plist);
+    }
+    for name in [crate::product::display_name(), crate::product::install_name()] {
+        let bundle = format!("/Applications/{name}.app");
+        let _ = std::process::Command::new("/bin/rm")
+            .args(["-rf", &bundle])
+            .status();
+    }
+}
+
 pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {
     // to-do: do together with win/linux about refactory start/stop service
     if !is_installed_daemon(false) {

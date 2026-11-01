@@ -5,7 +5,15 @@ import 'product.dart';
 /// two copies together when the wording changes.
 String installEmailSubject() => 'Your Smart Desktop Access program';
 
-String installEmailBody() {
+String installEmailBody({String invite = ''}) {
+  final code = invite.trim();
+  final windows = code.isEmpty
+      ? kSdaWindowsDownloadUrl
+      : '$kSdaCompanionUrl/d/$code/windows';
+  final mac = code.isEmpty ? kSdaMacArmDownloadUrl : '$kSdaCompanionUrl/d/$code/mac';
+  final intel = code.isEmpty
+      ? kSdaMacIntelDownloadUrl
+      : '$kSdaCompanionUrl/d/$code/mac-intel';
   return '''
 Hello,
 
@@ -14,7 +22,7 @@ This is the program that lets your helper work on your computer with you.
 Please install it once. After that you do not need to do anything else. Your computer can be reached when it is turned on and connected to the internet.
 
 Windows
-1. Download the Windows installer: $kSdaWindowsDownloadUrl
+1. Download the Windows installer: $windows
 2. Open the downloaded file.
 3. If Windows asks whether to allow changes, click Yes.
 4. Click Install and wait until it finishes.
@@ -22,7 +30,7 @@ Windows
 6. You can close the window. A small icon stays near the clock. That means the program is ready.
 
 Mac (most Macs from 2020 onward, Apple silicon)
-1. Download the Mac installer: $kSdaMacArmDownloadUrl
+1. Download the Mac installer: $mac
 2. Open the downloaded file and drag Smart Desktop Access into Applications.
 3. Open Applications and double-click Smart Desktop Access.
 4. If the Mac says the app cannot be opened: click Done, then open System Settings, go to Privacy & Security, and click Open Anyway.
@@ -31,7 +39,7 @@ Mac (most Macs from 2020 onward, Apple silicon)
 7. If it offers to install a background helper, click Install. That starts the program when you log in.
 
 Older Intel Mac
-Download this installer instead: $kSdaMacIntelDownloadUrl
+Download this installer instead: $intel
 Then follow the same Mac steps above.
 
 You only do this once. If something does not work, reply to this email.
@@ -40,8 +48,8 @@ All downloads are also listed here: $kSdaDownloadPageUrl
 ''';
 }
 
-String installMailto(String email) {
+String installMailto(String email, {String invite = ''}) {
   final subject = Uri.encodeComponent(installEmailSubject());
-  final body = Uri.encodeComponent(installEmailBody());
+  final body = Uri.encodeComponent(installEmailBody(invite: invite));
   return 'mailto:$email?subject=$subject&body=$body';
 }

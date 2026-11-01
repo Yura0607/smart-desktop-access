@@ -189,6 +189,39 @@ class Notes:
                 dest_row["log"] = dest_row["log"][-MAX_LOG_ENTRIES:]
             self._write(data)
 
+    def archive(self, owner: str) -> None:
+        if not _valid_owner(owner):
+            return
+        with self._lock:
+            data = self._read()
+            owners = data.get("owners", {})
+            row = owners.pop(owner, None)
+            if not isinstance(row, dict):
+                return
+            self._write(data)
+            self._append_archive(owner, row)
+
+    def _append_archive(self, owner: str, row: dict[str, Any]) -> None:
+        path = self.path.parent / "notes-archive.json"
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {"entries": []}
+        if not isinstance(existing, dict):
+            existing = {"entries": []}
+        entries = existing.setdefault("entries", [])
+        if not isinstance(entries, list):
+            entries = []
+            existing["entries"] = entries
+        entries.append({"owner": owner, "archived_at": int(time.time()), "record": row})
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(existing), encoding="utf-8")
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+
     def drop(self, owner: str) -> None:
         if not _valid_owner(owner):
             return
