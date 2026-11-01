@@ -27,10 +27,44 @@ import email_text
 
 ONLINE_SECONDS = 180
 ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
+REGISTER_LIMIT = 30
+ADMIN_LIMIT = 120
+RATE_WINDOW_SECONDS = 60.0
+MAX_EMAIL_LEN = 254
+MAX_HOSTNAME_LEN = 128
+MAX_ID_LEN = 64
 
 
 def now() -> int:
     return int(time.time())
+
+
+def valid_email(value: str) -> bool:
+    if not value:
+        return True
+    if len(value) > MAX_EMAIL_LEN or any(ch in value for ch in " \t\r\n"):
+        return False
+    local, sep, domain = value.partition("@")
+    if not sep or not local or "@" in domain or "." not in domain:
+        return False
+    return not domain.startswith(".") and not domain.endswith(".")
+
+
+class RateLimiter:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hits: dict[str, list[float]] = {}
+
+    def allow(self, key: str, limit: int, window: float = RATE_WINDOW_SECONDS) -> bool:
+        stamp = time.monotonic()
+        with self._lock:
+            recent = [item for item in self._hits.get(key, []) if stamp - item < window]
+            if len(recent) >= limit:
+                self._hits[key] = recent
+                return False
+            recent.append(stamp)
+            self._hits[key] = recent
+            return True
 
 
 class Store:
@@ -58,8 +92,18 @@ class Store:
 
     def upsert(self, payload: dict[str, Any]) -> dict[str, Any]:
         device_id = str(payload.get("id") or "").strip()
-        if not device_id or any(ch not in ID_OK for ch in device_id):
+        if (
+            not device_id
+            or len(device_id) > MAX_ID_LEN
+            or any(ch not in ID_OK for ch in device_id)
+        ):
             raise ValueError("invalid id")
+        email = str(payload.get("email") or "").strip()
+        if not valid_email(email):
+            raise ValueError("invalid email")
+        hostname = str(payload.get("hostname") or "")
+        if len(hostname) > MAX_HOSTNAME_LEN:
+            raise ValueError("hostname too long")
         with self._lock:
             data = self._read()
             devices = data.setdefault("devices", {})
@@ -175,7 +219,7 @@ class Smtp:
             smtp.login(self.user, self.password)
 
 
-def make_handler(store: Store, smtp: Smtp, admin_token: str):
+def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimiter):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
             # Do not log request bodies; they contain passwords.
@@ -206,7 +250,22 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
 
         def _authorized(self) -> bool:
             header = self.headers.get("Authorization", "")
-            return header == "Bearer " + admin_token
+            return bool(admin_token) and header == "Bearer " + admin_token
+
+        def _client_ip(self) -> str:
+            forwarded = self.headers.get("X-Forwarded-For", "")
+            if forwarded:
+                hop = forwarded.split(",")[0].strip()
+                if hop:
+                    return hop
+            return self.client_address[0]
+
+        def _too_fast(self, bucket: str) -> bool:
+            limit = REGISTER_LIMIT if bucket == "register" else ADMIN_LIMIT
+            if limiter.allow(f"{bucket}:{self._client_ip()}", limit):
+                return False
+            self._send(429, {"error": "too many requests"})
+            return True
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             self._send(204, {})
@@ -232,6 +291,8 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
                 self._send(200, {"ok": True, "smtp": smtp.configured})
                 return
             if path == "/api/v1/devices":
+                if self._too_fast("admin"):
+                    return
                 if not self._authorized():
                     self._send(401, {"error": "unauthorized"})
                     return
@@ -247,6 +308,8 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
                 self._send(400, {"error": "bad json"})
                 return
             if path == "/api/v1/devices":
+                if self._too_fast("register"):
+                    return
                 try:
                     saved = store.upsert(payload)
                 except PermissionError:
@@ -258,6 +321,8 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
                 self._send(200, {"ok": True, "device_token": saved["device_token"]})
                 return
             if path.startswith("/api/v1/devices/") and path.endswith("/email"):
+                if self._too_fast("admin"):
+                    return
                 if not self._authorized():
                     self._send(401, {"error": "unauthorized"})
                     return
@@ -299,6 +364,8 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
             prefix = "/api/v1/devices/"
             if not path.startswith(prefix) or "/" in path[len(prefix) :].strip("/"):
                 self._send(404, {"error": "not found"})
+                return
+            if self._too_fast("admin"):
                 return
             if not self._authorized():
                 self._send(401, {"error": "unauthorized"})
@@ -350,7 +417,8 @@ def serve(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     store = Store(data_dir / "devices.json")
     token = load_admin_token(data_dir)
     smtp = Smtp()
-    server = ThreadingHTTPServer((host, port), make_handler(store, smtp, token))
+    limiter = RateLimiter()
+    server = ThreadingHTTPServer((host, port), make_handler(store, smtp, token, limiter))
     return server
 
 

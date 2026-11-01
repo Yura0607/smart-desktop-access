@@ -100,12 +100,16 @@ pub fn apply() {
         overwrite.insert("force-always-relay".to_owned(), "Y".to_owned());
     }
     if !is_admin() {
-        // Unattended: accept the permanent password and do not ask anyone to click.
-        overwrite.insert("approve-mode".to_owned(), "password".to_owned());
+        // Click Accept on the consent panel, unless the manager presents the
+        // permanent password stored by the companion.
+        overwrite.insert("approve-mode".to_owned(), "password-click".to_owned());
         overwrite.insert(
             "verification-method".to_owned(),
             "use-permanent-password".to_owned(),
         );
+        overwrite.insert("enable-lan-discovery".to_owned(), "N".to_owned());
+        overwrite.insert("direct-server".to_owned(), "N".to_owned());
+        overwrite.insert("allow-insecure-tls-fallback".to_owned(), "N".to_owned());
         // The manager sends and receives files. Do not leave this at No.
         overwrite.insert("enable-file-transfer".to_owned(), "Y".to_owned());
     }
@@ -139,6 +143,9 @@ mod tests {
         assert!(!CLIENT_INSTALL_NAME.contains(' '));
         assert!(!ADMIN_INSTALL_NAME.contains(' '));
         assert!(SOURCE_URL.contains("Yura0607/smart-desktop-access"));
+        assert!(API_SERVER.starts_with("https://"));
+        assert!(!API_SERVER.contains(":21114"));
+        assert!(!COMPANION_URL.contains(":21120"));
         assert_eq!(API_SERVER, "https://smartdesktopaccess.duckdns.org");
         assert_eq!(
             COMPANION_URL,

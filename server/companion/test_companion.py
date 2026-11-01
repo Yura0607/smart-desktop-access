@@ -139,6 +139,34 @@ class CompanionTest(unittest.TestCase):
         self.assertEqual(device["alias"], "Front desk")
         self.assertEqual(device["hostname"], "Office-PC-2")
 
+    def test_invalid_email_and_register_rate_limit(self):
+        status, body = self.request(
+            "POST",
+            "/api/v1/devices",
+            {"id": "123456789", "email": "not-an-email", "hostname": "PC"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"], "invalid email")
+        old = companion.REGISTER_LIMIT
+        companion.REGISTER_LIMIT = 3
+        try:
+            for index in range(2):
+                status, _ = self.request(
+                    "POST",
+                    "/api/v1/devices",
+                    {"id": "12345678%d" % index, "hostname": "PC"},
+                )
+                self.assertEqual(status, 200)
+            status, limited = self.request(
+                "POST",
+                "/api/v1/devices",
+                {"id": "123456782", "hostname": "PC"},
+            )
+            self.assertEqual(status, 429)
+            self.assertEqual(limited["error"], "too many requests")
+        finally:
+            companion.REGISTER_LIMIT = old
+
 
 if __name__ == "__main__":
     unittest.main()
