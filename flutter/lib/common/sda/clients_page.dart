@@ -5,6 +5,7 @@ import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/sda/email_text.dart';
+import 'package:flutter_hbb/common/sda/notes_dialog.dart';
 import 'package:flutter_hbb/common/sda/product.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:http/http.dart' as http;
@@ -200,6 +201,24 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
           ? 'Disconnected from ${client.label}.'
           : 'No open session to ${client.label}.'),
     ));
+  }
+
+  Future<void> _openNotes(SdaClient client) async {
+    final token = bind.mainGetLocalOption(key: _tokenKey);
+    if (token.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Save the admin token first.'),
+      ));
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => SdaNotesDialog(
+        ownerId: client.id,
+        label: client.label,
+        token: token,
+      ),
+    );
   }
 
   Future<void> _rename(SdaClient client) async {
@@ -537,6 +556,10 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                                   onPressed: () => _disconnect(client),
                                   child: const Text('Disconnect'),
                                 ),
+                              TextButton(
+                                onPressed: () => _openNotes(client),
+                                child: const Text('Notes'),
+                              ),
                               TextButton(
                                 onPressed: () => _sendEmail(client),
                                 child: const Text('Send email'),

@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -232,6 +233,188 @@ class CompanionTest(unittest.TestCase):
             self.assertEqual(limited["error"], "too many requests")
         finally:
             companion.REGISTER_LIMIT = old
+
+    def _register(self, device_id="123456789", email="mary@example.com"):
+        return self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": device_id,
+                "hostname": "Office-PC",
+                "email": email,
+                "password": "pw",
+            },
+        )
+
+    def test_notes_are_encrypted_and_survive_linking(self):
+        secret = "sda-credential-HorseBattery-99!"
+        status, pending = self.request(
+            "POST",
+            "/api/v1/clients",
+            {"name": "Front desk", "email": "mary@example.com"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        invite = pending["invite"]
+        status, denied = self.request(
+            "PUT",
+            "/api/v1/devices/%s/notes" % invite,
+            {"credentials": secret},
+        )
+        self.assertEqual(status, 401)
+        status, saved = self.request(
+            "PUT",
+            "/api/v1/devices/%s/notes" % invite,
+            {"credentials": secret},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, too_long = self.request(
+            "PUT",
+            "/api/v1/devices/%s/notes" % invite,
+            {"credentials": "x" * 10001},
+            token="test-token",
+        )
+        self.assertEqual(status, 400)
+        status, loaded = self.request(
+            "GET",
+            "/api/v1/devices/%s/notes" % invite,
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(loaded["credentials"], secret)
+        status, first = self.request(
+            "POST",
+            "/api/v1/devices/%s/log" % invite,
+            {"text": "replaced the toner"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertIn("created_at", first)
+        status, second = self.request(
+            "POST",
+            "/api/v1/devices/%s/log" % invite,
+            {"text": "checked the printer"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, edited = self.request(
+            "PUT",
+            "/api/v1/devices/%s/log/%s" % (invite, second["id"]),
+            {"text": "checked the scanner"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(edited["created_at"], second["created_at"])
+        data_dir = Path(self.tmp.name)
+        stored = (data_dir / "notes.json").read_text(encoding="utf-8")
+        devices = (data_dir / "devices.json").read_text(encoding="utf-8")
+        self.assertNotIn(secret, stored)
+        self.assertNotIn(secret, devices)
+        self.assertIn("replaced the toner", stored)
+        key_mode = os.stat(data_dir / "notes.key").st_mode & 0o777
+        self.assertEqual(key_mode, stat.S_IRUSR | stat.S_IWUSR)
+        notes_mode = os.stat(data_dir / "notes.json").st_mode & 0o777
+        self.assertEqual(notes_mode, stat.S_IRUSR | stat.S_IWUSR)
+        status, created = self._register()
+        self.assertEqual(status, 200)
+        status, moved = self.request(
+            "GET",
+            "/api/v1/devices/123456789/notes",
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(moved["credentials"], secret)
+        self.assertEqual(
+            [entry["text"] for entry in moved["log"]],
+            ["checked the scanner", "replaced the toner"],
+        )
+        status, gone = self.request(
+            "GET",
+            "/api/v1/devices/%s/notes" % invite,
+            token="test-token",
+        )
+        self.assertEqual(status, 404)
+        status, again = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "password": "pw",
+                "device_token": created["device_token"],
+            },
+        )
+        self.assertEqual(status, 200)
+        status, kept = self.request(
+            "GET",
+            "/api/v1/devices/123456789/notes",
+            token="test-token",
+        )
+        self.assertEqual(kept["credentials"], secret)
+        status, removed = self.request(
+            "DELETE",
+            "/api/v1/devices/123456789/log/%s" % first["id"],
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, after = self.request(
+            "GET",
+            "/api/v1/devices/123456789/notes",
+            token="test-token",
+        )
+        self.assertEqual([entry["text"] for entry in after["log"]], ["checked the scanner"])
+        devices = (data_dir / "devices.json").read_text(encoding="utf-8")
+        self.assertNotIn(secret, devices)
+        status, spare = self.request(
+            "POST",
+            "/api/v1/clients",
+            {"name": "Spare", "email": "spare@example.com"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        spare_secret = "sda-credential-spare-door-code"
+        status, _ = self.request(
+            "PUT",
+            "/api/v1/devices/%s/notes" % spare["invite"],
+            {"credentials": spare_secret},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, _ = self.request(
+            "DELETE",
+            "/api/v1/clients/%s" % spare["invite"],
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        stored = (data_dir / "notes.json").read_text(encoding="utf-8")
+        self.assertNotIn(spare_secret, stored)
+        self.assertNotIn(spare["invite"], json.loads(stored)["owners"])
+
+    def test_notes_rate_limit(self):
+        status, _ = self._register()
+        self.assertEqual(status, 200)
+        old = companion.ADMIN_LIMIT
+        companion.ADMIN_LIMIT = 2
+        try:
+            self.assertEqual(
+                self.request("GET", "/api/v1/devices/123456789/notes", token="test-token")[0],
+                200,
+            )
+            self.assertEqual(
+                self.request("GET", "/api/v1/devices/123456789/notes", token="test-token")[0],
+                200,
+            )
+            status, body = self.request(
+                "GET",
+                "/api/v1/devices/123456789/notes",
+                token="test-token",
+            )
+            self.assertEqual(status, 429)
+            self.assertEqual(body["error"], "too many requests")
+        finally:
+            companion.ADMIN_LIMIT = old
 
 
 if __name__ == "__main__":

@@ -31,7 +31,8 @@ On the VM, as a user who can `sudo`:
 ```sh
 sudo useradd --system --create-home --home-dir /var/lib/sda-companion sda || true
 sudo mkdir -p /opt/sda-companion /var/lib/sda-companion
-sudo cp companion.py email_text.py /opt/sda-companion/
+sudo apt-get install -y python3-cryptography
+sudo cp companion.py email_text.py notes.py /opt/sda-companion/
 sudo cp -a web /opt/sda-companion/web
 sudo cp sda-companion.env.example /etc/sda-companion.env
 sudo chown -R sda:sda /opt/sda-companion /var/lib/sda-companion
@@ -90,5 +91,13 @@ hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old 
 `PATCH /api/v1/devices/<id>` — same header, body `{"alias": "Front desk"}`. Empty alias clears the name. A later client registration does not replace it.
 
 `POST /api/v1/clients` — same header, body `{"name", "email", "note"}`. Creates a pending record and a short invite code. `POST /api/v1/clients/<invite>/email` sends the install mail. The download links are `https://smartdesktopaccess.duckdns.org/companion/d/<invite>/windows` (and `mac`, `mac-intel`) and redirect to the GitHub installers. The person does not type the code. When the installed client registers with the same email address, ignoring capitals, the pending record becomes that device and keeps the name. `DELETE /api/v1/clients/<invite>` removes a pending record.
+
+`GET /api/v1/devices/<id>/notes` and `PUT /api/v1/devices/<id>/notes` — same header. `<id>` is a device id or a pending invite. PUT body is `{"credentials": "..."}` (at most 10,000 characters). The value is a Fernet token in `notes.json`. The key is `notes.key` in the data directory, created on first start, mode 600. It is not written into `devices.json` and it is not logged.
+
+`POST /api/v1/devices/<id>/log` body `{"text": "..."}` adds a work-log line with `created_at`. `PUT /api/v1/devices/<id>/log/<entry>` edits the text. `DELETE /api/v1/devices/<id>/log/<entry>` removes it. The list is newest first, capped at 200 lines. These routes use the same admin rate limit as the device list.
+
+## Backups
+
+Back up all of `/var/lib/sda-companion`. That directory holds `devices.json`, `notes.json`, `notes.key`, and `admin-token`. `notes.json` has the work log in plain text and credentials only as ciphertext. Restoring `notes.json` without `notes.key` makes the stored passwords unreadable. Do not commit either file.
 
 Registration is open on purpose: the client program cannot keep a secret. After the first registration the device token blocks overwrites. Do not put the admin token in the client build.

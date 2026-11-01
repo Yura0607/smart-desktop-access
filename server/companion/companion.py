@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import email_text
+import notes as client_notes
 
 ONLINE_SECONDS = 180
 ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
@@ -147,7 +148,10 @@ class Store:
                 record["note"] = note
             devices[device_id] = record
             self._write(data)
-            return dict(devices[device_id])
+            result = dict(record)
+            if linked:
+                result["_linked_from"] = str(linked.get("invite") or "")
+            return result
 
     def list_devices(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -305,6 +309,16 @@ class Smtp:
             smtp.login(self.user, self.password)
 
 
+def _device_parts(path: str) -> list[str] | None:
+    prefix = "/api/v1/devices/"
+    if not path.startswith(prefix):
+        return None
+    rest = path[len(prefix) :].strip("/")
+    if not rest or "/" not in rest:
+        return None
+    return rest.split("/")
+
+
 def _download_target(path: str) -> str:
     parts = [part for part in path.split("/") if part]
     if len(parts) != 3 or parts[0] != "d":
@@ -312,7 +326,7 @@ def _download_target(path: str) -> str:
     return email_text.direct_url(parts[2])
 
 
-def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimiter):
+def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimiter, client_notes_store: client_notes.Notes):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
             # Do not log request bodies; they contain passwords.
@@ -325,7 +339,7 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
             self.end_headers()
             self.wfile.write(data)
 
@@ -398,6 +412,10 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                     return
                 self._send(200, {"devices": store.list_devices(), "pending": store.list_pending()})
                 return
+            parts = _device_parts(path)
+            if parts is not None and parts[1:] == ["notes"]:
+                self._read_notes(parts[0])
+                return
             self._send(404, {"error": "not found"})
 
         def do_POST(self) -> None:  # noqa: N802
@@ -435,6 +453,12 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 except ValueError as err:
                     self._send(400, {"error": str(err)})
                     return
+                linked_from = str(saved.pop("_linked_from", "") or "")
+                if linked_from:
+                    try:
+                        client_notes_store.reassign(linked_from, str(saved.get("id") or ""))
+                    except Exception as err:
+                        print("notes reassign failed:", type(err).__name__)
                 self._send(200, {"ok": True, "device_token": saved["device_token"]})
                 return
             if path.startswith("/api/v1/devices/") and path.endswith("/email"):
@@ -509,10 +533,34 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 letter["sent"] = True
                 self._send(200, letter)
                 return
+            parts = _device_parts(path)
+            if parts is not None and parts[1:] == ["log"]:
+                self._add_log(parts[0], payload)
+                return
+            self._send(404, {"error": "not found"})
+
+        def do_PUT(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            try:
+                payload = self._json()
+            except (ValueError, json.JSONDecodeError):
+                self._send(400, {"error": "bad json"})
+                return
+            parts = _device_parts(path)
+            if parts is not None and parts[1:] == ["notes"]:
+                self._write_notes(parts[0], payload)
+                return
+            if parts is not None and len(parts) == 3 and parts[1] == "log":
+                self._edit_log(parts[0], parts[2], payload)
+                return
             self._send(404, {"error": "not found"})
 
         def do_DELETE(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
+            parts = _device_parts(path)
+            if parts is not None and len(parts) == 3 and parts[1] == "log":
+                self._remove_log(parts[0], parts[2])
+                return
             prefix = "/api/v1/clients/"
             if not path.startswith(prefix) or "/" in path[len(prefix) :].strip("/"):
                 self._send(404, {"error": "not found"})
@@ -526,6 +574,7 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             if not store.delete_pending(invite):
                 self._send(404, {"error": "unknown client"})
                 return
+            client_notes_store.drop(invite)
             self._send(200, {"ok": True})
 
         def do_PATCH(self) -> None:  # noqa: N802
@@ -558,6 +607,82 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 return
             self._send(200, saved)
 
+        def _admin(self) -> bool:
+            if self._too_fast("admin"):
+                return False
+            if not self._authorized():
+                self._send(401, {"error": "unauthorized"})
+                return False
+            return True
+
+        def _known(self, owner: str) -> bool:
+            if store.get(owner) is None and store.get_pending(owner) is None:
+                self._send(404, {"error": "unknown device"})
+                return False
+            return True
+
+        def _read_notes(self, owner: str) -> None:
+            if not self._admin() or not self._known(owner):
+                return
+            try:
+                self._send(200, client_notes_store.get(owner))
+            except RuntimeError:
+                self._send(500, {"error": "cannot read credentials"})
+            except ValueError as err:
+                self._send(400, {"error": str(err)})
+
+        def _write_notes(self, owner: str, payload: dict[str, Any]) -> None:
+            if not self._admin() or not self._known(owner):
+                return
+            if "credentials" not in payload:
+                self._send(400, {"error": "credentials required"})
+                return
+            try:
+                client_notes_store.put_credentials(owner, payload.get("credentials"))
+            except ValueError as err:
+                self._send(400, {"error": str(err)})
+                return
+            except RuntimeError:
+                self._send(500, {"error": "cannot read credentials"})
+                return
+            self._send(200, {"ok": True})
+
+        def _add_log(self, owner: str, payload: dict[str, Any]) -> None:
+            if not self._admin() or not self._known(owner):
+                return
+            try:
+                entry = client_notes_store.add_log(owner, payload.get("text"))
+            except ValueError as err:
+                self._send(400, {"error": str(err)})
+                return
+            self._send(200, entry)
+
+        def _edit_log(self, owner: str, entry_id: str, payload: dict[str, Any]) -> None:
+            if not self._admin() or not self._known(owner):
+                return
+            try:
+                entry = client_notes_store.edit_log(owner, entry_id, payload.get("text"))
+            except KeyError:
+                self._send(404, {"error": "unknown entry"})
+                return
+            except ValueError as err:
+                self._send(400, {"error": str(err)})
+                return
+            self._send(200, entry)
+
+        def _remove_log(self, owner: str, entry_id: str) -> None:
+            if not self._admin() or not self._known(owner):
+                return
+            try:
+                client_notes_store.delete_log(owner, entry_id)
+            except KeyError:
+                self._send(404, {"error": "unknown entry"})
+                return
+            except ValueError as err:
+                self._send(400, {"error": str(err)})
+                return
+            self._send(200, {"ok": True})
+
     return Handler
 
 
@@ -587,7 +712,11 @@ def serve(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     token = load_admin_token(data_dir)
     smtp = Smtp()
     limiter = RateLimiter()
-    server = ThreadingHTTPServer((host, port), make_handler(store, smtp, token, limiter))
+    client_notes_store = client_notes.Notes(data_dir)
+    server = ThreadingHTTPServer(
+        (host, port),
+        make_handler(store, smtp, token, limiter, client_notes_store),
+    )
     return server
 
 
