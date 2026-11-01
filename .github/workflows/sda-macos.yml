@@ -7,6 +7,8 @@ on:
 
 # Disk images are workflow artifacts only. This does not publish a GitHub
 # Release, so it does not move the stable "latest" release.
+# A cancelled matrix job has to be retried with a new push; this token cannot
+# rerun or dispatch workflows.
 
 permissions:
   contents: write
