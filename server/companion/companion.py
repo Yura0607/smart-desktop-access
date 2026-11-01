@@ -73,7 +73,9 @@ class Store:
             stamp = now()
             email = str(payload.get("email") or current.get("email") or "").strip()
             password = str(payload.get("password") or current.get("password") or "")
-            devices[device_id] = {
+            # The client must not replace a name the admin set.
+            alias = str(current.get("alias") or "").strip()
+            record = {
                 "id": device_id,
                 "hostname": str(payload.get("hostname") or current.get("hostname") or ""),
                 "email": email,
@@ -84,6 +86,9 @@ class Store:
                 "first_seen": int(current.get("first_seen") or stamp),
                 "last_seen": stamp,
             }
+            if alias:
+                record["alias"] = alias
+            devices[device_id] = record
             self._write(data)
             return dict(devices[device_id])
 
@@ -97,8 +102,33 @@ class Store:
             row.pop("device_token", None)
             row["online"] = stamp - int(row.get("last_seen") or 0) <= ONLINE_SECONDS
             rows.append(row)
-        rows.sort(key=lambda row: (not row["online"], row.get("hostname") or row["id"]))
+        rows.sort(
+            key=lambda row: (
+                not row["online"],
+                (row.get("alias") or row.get("hostname") or row["id"]).lower(),
+            )
+        )
         return rows
+
+    def set_alias(self, device_id: str, alias: str) -> dict[str, Any] | None:
+        alias = alias.strip()
+        if len(alias) > 80:
+            raise ValueError("alias too long")
+        if any(ch in alias for ch in "\r\n\x00"):
+            raise ValueError("invalid alias")
+        with self._lock:
+            data = self._read()
+            devices = data.get("devices", {})
+            current = devices.get(device_id)
+            if not isinstance(current, dict):
+                return None
+            if alias:
+                current["alias"] = alias
+            else:
+                current.pop("alias", None)
+            devices[device_id] = current
+            self._write(data)
+        return self.get(device_id)
 
     def get(self, device_id: str) -> dict[str, Any] | None:
         for row in self.list_devices():
@@ -158,7 +188,7 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
             self.end_headers()
             self.wfile.write(data)
 
@@ -263,6 +293,34 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str):
                 self._send(200, letter)
                 return
             self._send(404, {"error": "not found"})
+
+        def do_PATCH(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            prefix = "/api/v1/devices/"
+            if not path.startswith(prefix) or "/" in path[len(prefix) :].strip("/"):
+                self._send(404, {"error": "not found"})
+                return
+            if not self._authorized():
+                self._send(401, {"error": "unauthorized"})
+                return
+            device_id = path[len(prefix) :].strip("/")
+            try:
+                payload = self._json()
+            except (ValueError, json.JSONDecodeError):
+                self._send(400, {"error": "bad json"})
+                return
+            if "alias" not in payload:
+                self._send(400, {"error": "alias required"})
+                return
+            try:
+                saved = store.set_alias(device_id, str(payload.get("alias") or ""))
+            except ValueError as err:
+                self._send(400, {"error": str(err)})
+                return
+            if saved is None:
+                self._send(404, {"error": "unknown device"})
+                return
+            self._send(200, saved)
 
     return Handler
 

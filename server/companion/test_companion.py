@@ -100,6 +100,45 @@ class CompanionTest(unittest.TestCase):
         self.assertNotIn("RustDesk", text)
         self.assertNotIn("129.213.112.22", text)
 
+    def test_alias_survives_reregistration(self):
+        status, created = self.request(
+            "POST",
+            "/api/v1/devices",
+            {"id": "123456789", "hostname": "Office-PC", "password": "pw"},
+        )
+        self.assertEqual(status, 200)
+        token = created["device_token"]
+        status, renamed = self.request(
+            "PATCH",
+            "/api/v1/devices/123456789",
+            {"alias": "Front desk"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(renamed["alias"], "Front desk")
+        self.assertNotIn("device_token", renamed)
+        status, _ = self.request(
+            "PATCH",
+            "/api/v1/devices/123456789",
+            {"alias": "Stolen"},
+        )
+        self.assertEqual(status, 401)
+        status, updated = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC-2",
+                "device_token": token,
+                "alias": "from the client",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        device = listed["devices"][0]
+        self.assertEqual(device["alias"], "Front desk")
+        self.assertEqual(device["hostname"], "Office-PC-2")
+
 
 if __name__ == "__main__":
     unittest.main()

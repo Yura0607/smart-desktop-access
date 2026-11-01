@@ -87,4 +87,6 @@ hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old 
 
 `POST /api/v1/devices/<id>/email` — same header. Sends the install mail, or returns `mailto` when SMTP is not available.
 
+`PATCH /api/v1/devices/<id>` — same header, body `{"alias": "Front desk"}`. Empty alias clears the name. A later client registration does not replace it.
+
 Registration is open on purpose: the client program cannot keep a secret. After the first registration the device token blocks overwrites. Do not put the admin token in the client build.

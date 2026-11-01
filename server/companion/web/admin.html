@@ -81,16 +81,41 @@
         };
       }
       document.getElementById('list').innerHTML = devices.map((device) => {
-        const name = esc(device.hostname || device.id);
+        const alias = String(device.alias || '').trim();
+        const host = String(device.hostname || '').trim();
+        const name = esc(alias || host || device.id);
+        const under = alias && host
+          ? '<div style="font-size:.85rem">' + esc(host) + '</div>'
+          : '';
         const state = device.online ? '<span class="online">Online</span>' : '<span class="offline">Offline</span>';
         const badge = known().has(device.id) ? '' : ' <span class="new">New</span>';
-        return '<div class="card"><strong>' + name + '</strong>' + badge +
+        return '<div class="card"><strong>' + name + '</strong>' + badge + under +
           '<div>' + esc(device.email || 'No email yet') + ' · ID ' + esc(device.id) + ' · ' + state + '</div>' +
-          '<p><button data-email="' + device.id + '" type="button">Send email</button></p></div>';
+          '<p><button data-email="' + device.id + '" type="button">Send email</button>' +
+          '<button data-rename="' + device.id + '" data-alias="' + esc(alias) + '" type="button">Rename</button></p></div>';
       }).join('') || '<div class="card">No computers yet.</div>';
       document.querySelectorAll('[data-email]').forEach((button) => {
         button.onclick = () => sendEmail(button.getAttribute('data-email'));
       });
+      document.querySelectorAll('[data-rename]').forEach((button) => {
+        button.onclick = () => rename(button.getAttribute('data-rename'), button.getAttribute('data-alias') || '');
+      });
+    }
+
+    async function rename(id, current) {
+      const alias = prompt('Name shown in this list', current);
+      if (alias === null) return;
+      const token = tokenInput.value.trim();
+      const response = await fetch(companionApi('/api/v1/devices/' + id), {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alias: alias.trim() })
+      });
+      if (!response.ok) {
+        alert('Could not rename this computer.');
+        return;
+      }
+      load();
     }
 
     async function sendEmail(id) {

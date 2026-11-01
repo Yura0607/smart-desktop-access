@@ -23,8 +23,10 @@ class SdaClient {
   String get email => '${json['email'] ?? ''}'.trim();
   String get password => '${json['password'] ?? ''}';
   String get platform => '${json['platform'] ?? ''}';
+  String get alias => '${json['alias'] ?? ''}'.trim();
   bool get online => json['online'] == true;
-  String get label => hostname.isEmpty ? id : hostname;
+  String get label =>
+      alias.isNotEmpty ? alias : (hostname.isEmpty ? id : hostname);
 }
 
 class SdaClientsPage extends StatefulWidget {
@@ -170,6 +172,57 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     ));
   }
 
+  Future<void> _rename(SdaClient client) async {
+    final controller = TextEditingController(text: client.alias);
+    final alias = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Name shown in this list',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (alias == null || !mounted) {
+      return;
+    }
+    final token = bind.mainGetLocalOption(key: _tokenKey);
+    try {
+      final response = await http.patch(
+        Uri.parse(sdaCompanionApi('/api/v1/devices/${client.id}')),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'alias': alias}),
+      );
+      if (response.statusCode == 200) {
+        await _refresh();
+        return;
+      }
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not rename this computer.'),
+      ));
+    }
+  }
+
   Future<void> _sendEmail(SdaClient client) async {
     if (client.email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -253,7 +306,18 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         ListTile(
-                          title: Text(client.label),
+                          title: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(client.label),
+                              if (client.alias.isNotEmpty &&
+                                  client.hostname.isNotEmpty)
+                                Text(
+                                  client.hostname,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                            ],
+                          ),
                           subtitle: Text(
                             [
                               if (client.email.isNotEmpty) client.email,
@@ -291,6 +355,10 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                               TextButton(
                                 onPressed: () => _sendEmail(client),
                                 child: const Text('Send email'),
+                              ),
+                              TextButton(
+                                onPressed: () => _rename(client),
+                                child: const Text('Rename'),
                               ),
                             ],
                           ),
