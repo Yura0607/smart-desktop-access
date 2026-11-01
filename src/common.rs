@@ -2295,7 +2295,15 @@ async fn key_exchange(conn: &mut Stream, key: &str, log_on_success: bool) -> Res
     let Some(rs_pk) = rs_pk else {
         bail!("Handshake failed: invalid public key from rendezvous server");
     };
-    match timeout(READ_TIMEOUT, conn.next()).await? {
+    // A server that never sends KeyExchange used to surface as
+    // "Failed to secure tcp: deadline has elapsed" and the punch,
+    // including relay, never started. Silence means this server did
+    // not offer the exchange; the caller sends its request next.
+    let next = match timeout(READ_TIMEOUT, conn.next()).await {
+        Ok(next) => next,
+        Err(_) => return Ok(false),
+    };
+    match next {
         Some(Ok(bytes)) => {
             if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
                 match msg_in.union {

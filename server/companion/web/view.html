@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Smart Desktop Access — view only</title>
-  <link rel="icon" href="/favicon.ico">
+  <link rel="icon" href="favicon.ico">
   <style>
     body { font-family: sans-serif; margin: 24px; max-width: 42rem; color: #102033; }
     button { font-size: 1rem; padding: 8px 14px; }
@@ -28,7 +28,7 @@
     const status = document.getElementById('status');
     agree.onchange = () => { start.disabled = !agree.checked; };
     start.onclick = () => {
-      status.textContent = 'The view-only screen is not connected yet. The browser client that decodes the picture is not in this repository (it lives in the gitignored flutter/web/js tree). See docs/WEB.md for the ports and the certificate this server still needs.';
+      status.textContent = 'This page does not send mouse or keyboard input. The picture itself is not shown yet: the browser decoder lives in flutter/web/js, which is not part of this repository. Control stays in Smart Desktop Access Admin.';
     };
   </script>
 </body>

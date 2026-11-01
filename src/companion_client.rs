@@ -53,10 +53,7 @@ async fn register_once() -> Result<(), String> {
         "version": crate::VERSION,
         "device_token": token,
     });
-    let url = format!(
-        "{}/api/v1/devices",
-        crate::product::COMPANION_URL.trim_end_matches('/')
-    );
+    let url = crate::product::companion_api("api/v1/devices");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()

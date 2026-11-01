@@ -52,15 +52,32 @@ Edit `/etc/sda-companion.env` with the mailbox the owner already has (any provid
 sudo systemctl restart sda-companion
 ```
 
-`GET http://129.213.112.22:21120/api/v1/health` returns `"smtp": true` when the host and sender are set. The password is never written to the log.
+`GET https://smartdesktopaccess.duckdns.org/companion/api/v1/health` returns `"smtp": true` when the host and sender are set. The password is never written to the log. Gmail uses `smtp.gmail.com` port 587 with `SMTP_TLS=starttls` and an app password.
 
 If SMTP is not set, or the provider refuses the message, Send email falls back to a `mailto:` link with the same English text.
 
 ## What the admin sees
 
 - Native admin app: the Computers list, after the token is saved on that computer.
-- Browser: `http://129.213.112.22:21120/` (same token). Connect is not in the browser page; open the admin app for control.
-- View-only page: `http://129.213.112.22:21120/view` (does not show a screen yet; see `docs/WEB.md`).
+- Browser: `https://smartdesktopaccess.duckdns.org/companion/` (same token). Connect is not in the browser page; open the admin app for control.
+- View-only page: `https://smartdesktopaccess.duckdns.org/companion/view` (does not show a screen yet; see `docs/WEB.md`).
+
+## Caddy
+
+The apps call `https://smartdesktopaccess.duckdns.org` and `https://smartdesktopaccess.duckdns.org/companion`. Caddy terminates TLS and strips the prefix:
+
+```
+smartdesktopaccess.duckdns.org {
+	handle_path /companion/* {
+		reverse_proxy 127.0.0.1:21120
+	}
+	handle {
+		reverse_proxy 127.0.0.1:21114
+	}
+}
+```
+
+hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old builds that still use the plain IP and ports 21114 and 21120 keep working during the move.
 
 ## API
 

@@ -220,7 +220,7 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                                 Icon(Icons.launch_outlined, size: 16)
                                     .marginOnly(right: 5),
                                 Text(
-                                  'Based on open-source software, AGPL-3.0',
+                                  kSdaCopyright,
                                   style: const TextStyle(
                                       decoration: TextDecoration.underline),
                                 )

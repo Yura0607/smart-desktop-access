@@ -83,7 +83,7 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     }
     try {
       final response = await http.get(
-        Uri.parse('${sdaCompanionUrl()}/api/v1/devices'),
+        Uri.parse(sdaCompanionApi('/api/v1/devices')),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (response.statusCode == 401) {
@@ -180,7 +180,7 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     final token = bind.mainGetLocalOption(key: _tokenKey);
     try {
       final response = await http.post(
-        Uri.parse('${sdaCompanionUrl()}/api/v1/devices/${client.id}/email'),
+        Uri.parse(sdaCompanionApi('/api/v1/devices/${client.id}/email')),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -199,6 +199,12 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
         }
         final mailto = '${body['mailto'] ?? ''}';
         if (mailto.isNotEmpty && await launchUrl(Uri.parse(mailto))) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'The server did not send the email. Your email program was opened instead.'),
+            ));
+          }
           return;
         }
       }

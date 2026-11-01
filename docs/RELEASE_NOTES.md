@@ -5,7 +5,7 @@ Two programs from one build:
 - **Smart Desktop Access** is installed on the customer's computer. It only accepts connections. It sets a permanent password, starts with Windows (service) or macOS (background helper), and asks for an email address once.
 - **Smart Desktop Access Admin** is the program you keep. It only makes connections. The Computers list has Connect, Disconnect, and Send email.
 
-The ID and relay server is `129.213.112.22`. Customers do not type a server address.
+The ID and relay server is `smartdesktopaccess.duckdns.org`. Customers do not type a server address.
 
 ## Downloads
 

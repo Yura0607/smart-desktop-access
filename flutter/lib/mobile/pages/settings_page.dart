@@ -1218,7 +1218,7 @@ void showAbout(OverlayDialogManager dialogManager) {
             },
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: const Text('Based on open-source software, AGPL-3.0',
+              child: const Text(kSdaCopyright,
                   style: TextStyle(
                     decoration: TextDecoration.underline,
                   )),

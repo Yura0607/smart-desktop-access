@@ -7,7 +7,7 @@ Remote access for Yuriy's customers. Two programs, one server, no account to con
 | Smart Desktop Access | The customer's Windows or Mac computer | Accepts connections only. One install, then it starts with the computer. |
 | Smart Desktop Access Admin | Yuriy, on Windows, Mac, Android, or iPhone/iPad | Connects out only. Lists every customer computer. |
 
-The ID and relay server is built in: `129.213.112.22`, public key `IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc=`. Change those, and only those, in [`src/product.rs`](src/product.rs).
+The ID and relay server is built in: `smartdesktopaccess.duckdns.org` (ports 21116 and 21117), public key `IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc=`. Account login is `https://smartdesktopaccess.duckdns.org`. The companion is `https://smartdesktopaccess.duckdns.org/companion`. Change the host, and only the host, in [`src/product.rs`](src/product.rs).
 
 Based on open-source software, [AGPL-3.0](LICENSE). Source: https://github.com/Yura0607/smart-desktop-access
 

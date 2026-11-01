@@ -1868,7 +1868,7 @@ class RustdeskImpl {
     const variant = String.fromEnvironment('SDA_VARIANT');
     switch (key) {
       case 'companion-url':
-        return 'http://129.213.112.22:21120';
+        return 'https://smartdesktopaccess.duckdns.org/companion';
       case 'source-url':
         return 'https://github.com/Yura0607/smart-desktop-access';
       case 'download-page-url':

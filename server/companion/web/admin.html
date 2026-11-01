@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Smart Desktop Access Admin</title>
-  <link rel="icon" href="/favicon.ico">
+  <link rel="icon" href="favicon.ico">
   <style>
     body { font-family: sans-serif; margin: 24px; color: #102033; background: #f4f8fc; }
     h1 { font-size: 1.4rem; }
@@ -29,6 +29,11 @@
   <div id="banner"></div>
   <div id="list"></div>
   <script>
+    function companionApi(path) {
+      let dir = location.pathname.replace(/\/(admin|view)\/?$/, '');
+      if (!dir.endsWith('/')) dir += '/';
+      return dir + String(path).replace(/^\//, '');
+    }
     function esc(value) {
       return String(value).replace(/[&<>"']/g, (ch) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -51,7 +56,7 @@
         error.textContent = 'Paste the token printed when the companion service starts.';
         return;
       }
-      const response = await fetch('/api/v1/devices', { headers: { Authorization: 'Bearer ' + token } });
+      const response = await fetch(companionApi('/api/v1/devices'), { headers: { Authorization: 'Bearer ' + token } });
       if (response.status === 401) {
         error.textContent = 'That token was not accepted.';
         return;
@@ -90,7 +95,7 @@
 
     async function sendEmail(id) {
       const token = tokenInput.value.trim();
-      const response = await fetch('/api/v1/devices/' + id + '/email', {
+      const response = await fetch(companionApi('/api/v1/devices/' + id + '/email'), {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: '{}'

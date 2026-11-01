@@ -7,14 +7,19 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// ID/relay host. hbbs/hbbr on the Oracle VM.
-pub const SERVER_HOST: &str = "129.213.112.22";
+/// DNS name of the ID/relay, API, and companion host. Ports 21116 and 21117
+/// stay the protocol defaults. Change only this when the name changes.
+pub const SERVER_HOST: &str = "smartdesktopaccess.duckdns.org";
 /// hbbs public key (`-k` / `id_ed25519.pub`).
 pub const SERVER_PUBLIC_KEY: &str = "IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc=";
-/// Companion API (client list and email). Same VM, TCP 21120.
-pub const COMPANION_URL: &str = "http://129.213.112.22:21120";
-/// Account login (`lejianwen/rustdesk-api`). Same VM, TCP 21114.
-pub const API_SERVER: &str = "http://129.213.112.22:21114";
+/// Account login. Caddy on 443 proxies this host to rustdesk-api.
+pub const API_SERVER: &str = concat!("https://", SERVER_HOST);
+/// Companion API. Caddy strips the `/companion` prefix and proxies to the
+/// companion process.
+pub const COMPANION_URL: &str = concat!("https://", SERVER_HOST, "/companion");
+/// Shown as the Windows publisher / company. Not the install folder name.
+pub const PUBLISHER: &str = "Smart Desktop Access";
+pub const LEGAL_COPYRIGHT: &str = "Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0";
 pub const SOURCE_URL: &str = "https://github.com/Yura0607/smart-desktop-access";
 pub const DOWNLOAD_PAGE_URL: &str =
     "https://github.com/Yura0607/smart-desktop-access/releases/latest";
@@ -44,6 +49,16 @@ pub fn display_name() -> &'static str {
     } else {
         CLIENT_DISPLAY_NAME
     }
+}
+
+/// `path` is relative to the companion (`api/v1/devices`). The `/companion`
+/// prefix on [`COMPANION_URL`] is kept so Caddy can strip it.
+pub fn companion_api(path: &str) -> String {
+    format!(
+        "{}/{}",
+        COMPANION_URL.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
 }
 
 pub fn bundle_id() -> &'static str {
@@ -79,6 +94,11 @@ pub fn apply() {
     overwrite.insert("custom-rendezvous-server".to_owned(), SERVER_HOST.to_owned());
     overwrite.insert("key".to_owned(), SERVER_PUBLIC_KEY.to_owned());
     overwrite.insert("api-server".to_owned(), API_SERVER.to_owned());
+    if is_admin() {
+        // Same-LAN NAT hairpin accepts a direct socket and then never finishes
+        // the handshake. The manager always asks the relay.
+        overwrite.insert("force-always-relay".to_owned(), "Y".to_owned());
+    }
     if !is_admin() {
         // Unattended: accept the permanent password and do not ask anyone to click.
         overwrite.insert("approve-mode".to_owned(), "password".to_owned());
@@ -107,7 +127,7 @@ mod tests {
 
     #[test]
     fn product_constants_match_the_requirements() {
-        assert_eq!(SERVER_HOST, "129.213.112.22");
+        assert_eq!(SERVER_HOST, "smartdesktopaccess.duckdns.org");
         assert_eq!(
             SERVER_PUBLIC_KEY,
             "IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc="
@@ -117,7 +137,17 @@ mod tests {
         assert!(!CLIENT_INSTALL_NAME.contains(' '));
         assert!(!ADMIN_INSTALL_NAME.contains(' '));
         assert!(SOURCE_URL.contains("Yura0607/smart-desktop-access"));
-        assert_eq!(API_SERVER, "http://129.213.112.22:21114");
+        assert_eq!(API_SERVER, "https://smartdesktopaccess.duckdns.org");
+        assert_eq!(
+            COMPANION_URL,
+            "https://smartdesktopaccess.duckdns.org/companion"
+        );
+        assert_eq!(
+            companion_api("api/v1/devices"),
+            "https://smartdesktopaccess.duckdns.org/companion/api/v1/devices"
+        );
+        assert!(!API_SERVER.contains("129.213.112.22"));
+        assert!(!COMPANION_URL.contains("129.213.112.22"));
         assert!(install_name() == CLIENT_INSTALL_NAME || install_name() == ADMIN_INSTALL_NAME);
         assert_ne!(display_name(), "RustDesk");
     }

@@ -98,6 +98,7 @@ class CompanionTest(unittest.TestCase):
         self.assertIn(email_text.MAC_ARM_URL, text)
         self.assertIn(email_text.MAC_INTEL_URL, text)
         self.assertNotIn("RustDesk", text)
+        self.assertNotIn("129.213.112.22", text)
 
 
 if __name__ == "__main__":

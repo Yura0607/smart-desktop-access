@@ -78,7 +78,7 @@ env:
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}-2"
   SDA_VARIANT: ${{ inputs.variant }}
   SDA_EXE_NAME: ${{ inputs.variant == 'admin' && 'SmartDesktopAccessAdmin' || 'SmartDesktopAccess' }}
-  SDA_MANUFACTURER: ${{ inputs.variant == 'admin' && 'Smart Desktop Access Admin' || 'Smart Desktop Access' }}
+  SDA_MANUFACTURER: Smart Desktop Access
 
 jobs:
   validate-update-metadata-keys:

@@ -2618,7 +2618,7 @@ class _AboutState extends State<_About> {
                     launchUrlString(sdaSourceUrl());
                   },
                   child: Text(
-                    'Based on open-source software, AGPL-3.0',
+                    kSdaCopyright,
                     style: linkStyle,
                   ).marginSymmetric(vertical: 4.0)),
               SelectionArea(
@@ -2632,7 +2632,7 @@ class _AboutState extends State<_About> {
                   children: [
                     Expanded(
                       child: Text(
-                        'Based on open-source software, AGPL-3.0.\n${sdaSourceUrl()}',
+                        '$kSdaCopyright\n${sdaSourceUrl()}',
                         style: const TextStyle(color: Colors.white),
                       ),
                     ),

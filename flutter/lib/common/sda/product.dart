@@ -5,7 +5,9 @@ import 'package:flutter_hbb/models/platform_model.dart';
 const kSdaSourceUrl = 'https://github.com/Yura0607/smart-desktop-access';
 const kSdaDownloadPageUrl =
     'https://github.com/Yura0607/smart-desktop-access/releases/latest';
-const kSdaCompanionUrl = 'http://129.213.112.22:21120';
+const kSdaCompanionUrl = 'https://smartdesktopaccess.duckdns.org/companion';
+const kSdaCopyright =
+    'Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0';
 
 const kSdaWindowsDownloadUrl =
     'https://github.com/Yura0607/smart-desktop-access/releases/latest/download/SmartDesktopAccess-windows-x64.exe';
@@ -36,3 +38,15 @@ String sdaSourceUrl() => _builtin('source-url', kSdaSourceUrl);
 String sdaDownloadPageUrl() => _builtin('download-page-url', kSdaDownloadPageUrl);
 
 String sdaCompanionUrl() => _builtin('companion-url', kSdaCompanionUrl);
+
+/// Join [path] onto the companion base, keeping a `/companion` prefix.
+String sdaCompanionApi(String path) {
+  var base = sdaCompanionUrl();
+  while (base.endsWith('/')) {
+    base = base.substring(0, base.length - 1);
+  }
+  if (!path.startsWith('/')) {
+    path = '/$path';
+  }
+  return '$base$path';
+}
