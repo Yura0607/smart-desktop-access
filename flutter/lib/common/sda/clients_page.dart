@@ -143,6 +143,15 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     await connect(context, client.id, password: client.password);
   }
 
+  Future<void> _transferFiles(SdaClient client) async {
+    await connect(
+      context,
+      client.id,
+      isFileTransfer: true,
+      password: client.password,
+    );
+  }
+
   Future<void> _disconnect(SdaClient client) async {
     var closed = false;
     if (isDesktop) {
@@ -347,6 +356,10 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                               TextButton(
                                 onPressed: () => _connect(client),
                                 child: const Text('Connect'),
+                              ),
+                              TextButton(
+                                onPressed: () => _transferFiles(client),
+                                child: const Text('Files'),
                               ),
                               TextButton(
                                 onPressed: () => _disconnect(client),

@@ -106,6 +106,8 @@ pub fn apply() {
             "verification-method".to_owned(),
             "use-permanent-password".to_owned(),
         );
+        // The manager sends and receives files. Do not leave this at No.
+        overwrite.insert("enable-file-transfer".to_owned(), "Y".to_owned());
     }
     drop(overwrite);
 
