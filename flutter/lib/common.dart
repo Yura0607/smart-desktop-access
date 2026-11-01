@@ -248,18 +248,159 @@ class ColorThemeExtension extends ThemeExtension<ColorThemeExtension> {
 class MyTheme {
   MyTheme._();
 
-  static const Color grayBg = Color(0xFFEFEFF2);
-  static const Color accent = Color(0xFF0071FF);
-  static const Color accent50 = Color(0x770071FF);
-  static const Color accent80 = Color(0xAA0071FF);
+  static const Color grayBg = Color(0xFFF4F2FA);
+  static const Color blue = Color(0xFF3B5BFF);
+  static const Color blueBright = Color(0xFF4F6BFF);
+  static const Color purple = Color(0xFF7C3AED);
+  static const Color purpleBright = Color(0xFF8B5CF6);
+  static const Color accent = blue;
+  static const Color accent50 = Color(0x773B5BFF);
+  static const Color accent80 = Color(0xCC4F6BFF);
   static const Color canvasColor = Color(0xFF212121);
-  static const Color border = Color(0xFFCCCCCC);
-  static const Color idColor = Color(0xFF00B6F0);
+  static const Color border = Color(0xFFD9D6E5);
+  static const Color idColor = Color(0xFF5B4DFF);
   static const Color darkGray = Color.fromARGB(255, 148, 148, 148);
   static const Color cmIdColor = Color(0xFF21790B);
   static const Color dark = Colors.black87;
-  static const Color button = Color(0xFF2C8CFF);
-  static const Color hoverBorder = Color(0xFF999999);
+  static const Color button = blue;
+  static const Color hoverBorder = purpleBright;
+  static const LinearGradient primaryGradient = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [purple, blue],
+  );
+  static const LinearGradient primaryGradientHover = LinearGradient(
+    begin: Alignment.centerLeft,
+    end: Alignment.centerRight,
+    colors: [purpleBright, blueBright],
+  );
+  static const BoxDecoration headerDecoration = BoxDecoration(
+    gradient: primaryGradient,
+  );
+
+  /// Soft purple-blue glow. Hover lifts the color and widens the shadow.
+  static List<BoxShadow> glowShadows({
+    required bool hovered,
+    required bool pressed,
+  }) {
+    if (!hovered && !pressed) {
+      return const [
+        BoxShadow(
+          color: Color(0x333B5BFF),
+          blurRadius: 8,
+          offset: Offset(0, 2),
+        ),
+      ];
+    }
+    return [
+      BoxShadow(
+        color: const Color(0xAA8B5CF6),
+        blurRadius: pressed ? 10 : 18,
+        spreadRadius: pressed ? 0 : 1,
+        offset: Offset(0, pressed ? 1 : 2),
+      ),
+      BoxShadow(
+        color: const Color(0x884F6BFF),
+        blurRadius: pressed ? 8 : 24,
+        offset: Offset(0, pressed ? 2 : 6),
+      ),
+    ];
+  }
+
+  static BoxDecoration buttonDecoration({
+    required bool filled,
+    required bool outline,
+    required bool hovered,
+    required bool pressed,
+    required bool disabled,
+    required bool light,
+    double radius = 8,
+  }) {
+    final shape = BorderRadius.circular(radius);
+    if (disabled) {
+      return BoxDecoration(
+        color: light ? const Color(0xFFE6E8F2) : const Color(0xFF2A2C3A),
+        borderRadius: shape,
+      );
+    }
+    final hot = hovered || pressed;
+    if (filled) {
+      return BoxDecoration(
+        gradient: hot ? primaryGradientHover : primaryGradient,
+        borderRadius: shape,
+        boxShadow: glowShadows(hovered: hovered, pressed: pressed),
+      );
+    }
+    if (outline) {
+      return BoxDecoration(
+        color: hot
+            ? (light ? const Color(0xFFF3F0FF) : const Color(0xFF2A2448))
+            : (light ? const Color(0xFFF7F6FB) : const Color(0xFF24252B)),
+        borderRadius: shape,
+        border: Border.all(
+          color: hot
+              ? purpleBright
+              : (light ? const Color(0xFFD9D6E5) : Colors.white24),
+        ),
+        boxShadow: hot ? glowShadows(hovered: hovered, pressed: pressed) : const [],
+      );
+    }
+    return BoxDecoration(
+      color: hot
+          ? (light ? const Color(0x148B5CF6) : const Color(0x338B5CF6))
+          : Colors.transparent,
+      borderRadius: shape,
+      boxShadow: hot ? glowShadows(hovered: hovered, pressed: pressed) : const [],
+    );
+  }
+
+  /// Shared by text, elevated, and outlined buttons so hover glow matches.
+  static ButtonStyle glowButtonStyle({
+    required bool filled,
+    required bool light,
+    bool outline = false,
+    double radius = 8,
+  }) {
+    return ButtonStyle(
+      animationDuration: const Duration(milliseconds: 180),
+      elevation: const MaterialStatePropertyAll(0),
+      shadowColor: const MaterialStatePropertyAll(Colors.transparent),
+      backgroundColor: const MaterialStatePropertyAll(Colors.transparent),
+      overlayColor: const MaterialStatePropertyAll(Colors.transparent),
+      foregroundColor: MaterialStateProperty.resolveWith((states) {
+        final disabled = states.contains(MaterialState.disabled);
+        if (filled) {
+          return disabled
+              ? (light ? Colors.black38 : Colors.white38)
+              : Colors.white;
+        }
+        if (disabled) {
+          return light ? Colors.black38 : Colors.white38;
+        }
+        return light ? const Color(0xFF2A2466) : const Color(0xFFE4E0FF);
+      }),
+      shape: MaterialStatePropertyAll(
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
+      ),
+      backgroundBuilder: (context, states, child) {
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          decoration: buttonDecoration(
+            filled: filled,
+            outline: outline,
+            hovered: states.contains(MaterialState.hovered) ||
+                states.contains(MaterialState.focused),
+            pressed: states.contains(MaterialState.pressed),
+            disabled: states.contains(MaterialState.disabled),
+            light: light,
+            radius: radius,
+          ),
+          child: child,
+        );
+      },
+    );
+  }
 
   // ListTile
   static const ListTileThemeData listTileTheme = ListTileThemeData(
@@ -272,7 +413,20 @@ class MyTheme {
 
   static SwitchThemeData switchTheme() {
     return SwitchThemeData(
-        splashRadius: (isDesktop || isWebDesktop) ? 0 : kRadialReactionRadius);
+      splashRadius: (isDesktop || isWebDesktop) ? 0 : kRadialReactionRadius,
+      thumbColor: MaterialStateProperty.resolveWith((states) {
+        if (states.contains(MaterialState.selected)) {
+          return accent;
+        }
+        return null;
+      }),
+      trackColor: MaterialStateProperty.resolveWith((states) {
+        if (states.contains(MaterialState.selected)) {
+          return accent.withOpacity(0.45);
+        }
+        return null;
+      }),
+    );
   }
 
   static RadioThemeData radioTheme() {
@@ -281,9 +435,15 @@ class MyTheme {
   }
 
   // Checkbox
-  static const CheckboxThemeData checkboxTheme = CheckboxThemeData(
+  static final CheckboxThemeData checkboxTheme = CheckboxThemeData(
     splashRadius: 0,
-    shape: RoundedRectangleBorder(
+    fillColor: MaterialStateProperty.resolveWith((states) {
+      if (states.contains(MaterialState.selected)) {
+        return accent;
+      }
+      return null;
+    }),
+    shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.all(
         Radius.circular(5),
       ),
@@ -296,14 +456,6 @@ class MyTheme {
 
   // TextButton on mobile needs a fixed padding, otherwise small buttons
   // like "OK" has a larger left/right padding.
-  static TextButtonThemeData mobileTextButtonTheme = TextButtonThemeData(
-    style: TextButton.styleFrom(
-      padding: EdgeInsets.symmetric(horizontal: mobileTextButtonPaddingLR),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8.0),
-      ),
-    ),
-  );
 
   //tooltip
   static TooltipThemeData tooltipTheme() {
@@ -376,7 +528,10 @@ class MyTheme {
     hoverColor: Color.fromARGB(255, 224, 224, 224),
     scaffoldBackgroundColor: Colors.white,
     dialogBackgroundColor: Colors.white,
-    appBarTheme: AppBarTheme(
+    appBarTheme: const AppBarTheme(
+      backgroundColor: blue,
+      foregroundColor: Colors.white,
+      iconTheme: IconThemeData(color: Colors.white),
       shadowColor: Colors.transparent,
     ),
     dialogTheme: DialogTheme(
@@ -417,32 +572,23 @@ class MyTheme {
     splashColor: (isDesktop || isWebDesktop) ? Colors.transparent : null,
     highlightColor: (isDesktop || isWebDesktop) ? Colors.transparent : null,
     splashFactory: (isDesktop || isWebDesktop) ? NoSplash.splashFactory : null,
-    textButtonTheme: (isDesktop || isWebDesktop)
-        ? TextButtonThemeData(
-            style: TextButton.styleFrom(
-              splashFactory: NoSplash.splashFactory,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18.0),
+    textButtonTheme: TextButtonThemeData(
+      style: glowButtonStyle(filled: false, light: true, radius: 8).copyWith(
+        splashFactory: (isDesktop || isWebDesktop)
+            ? NoSplash.splashFactory
+            : null,
+        padding: (isDesktop || isWebDesktop)
+            ? null
+            : const MaterialStatePropertyAll(
+                EdgeInsets.symmetric(horizontal: mobileTextButtonPaddingLR),
               ),
-            ),
-          )
-        : mobileTextButtonTheme,
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: MyTheme.accent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
-        ),
       ),
     ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: glowButtonStyle(filled: true, light: true),
+    ),
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        backgroundColor: grayBg,
-        foregroundColor: Colors.black87,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
-        ),
-      ),
+      style: glowButtonStyle(filled: false, light: true, outline: true),
     ),
     switchTheme: switchTheme(),
     radioTheme: radioTheme(),
@@ -451,8 +597,13 @@ class MyTheme {
     menuBarTheme: MenuBarThemeData(
         style:
             MenuStyle(backgroundColor: MaterialStatePropertyAll(Colors.white))),
-    colorScheme: ColorScheme.light(
-        primary: Colors.blue, secondary: accent, background: grayBg),
+    colorScheme: const ColorScheme.light(
+      primary: blue,
+      secondary: purple,
+      onPrimary: Colors.white,
+      onSecondary: Colors.white,
+      background: grayBg,
+    ),
     popupMenuTheme: PopupMenuThemeData(
         color: Colors.white,
         shape: RoundedRectangleBorder(
@@ -474,7 +625,10 @@ class MyTheme {
     hoverColor: Color.fromARGB(255, 45, 46, 53),
     scaffoldBackgroundColor: Color(0xFF18191E),
     dialogBackgroundColor: Color(0xFF18191E),
-    appBarTheme: AppBarTheme(
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Color(0xFF1E1A3A),
+      foregroundColor: Colors.white,
+      iconTheme: IconThemeData(color: Colors.white),
       shadowColor: Colors.transparent,
     ),
     dialogTheme: DialogTheme(
@@ -506,7 +660,7 @@ class MyTheme {
       labelLarge: TextStyle(
         fontSize: 16.0,
         fontWeight: FontWeight.bold,
-        color: accent80,
+        color: Color(0xFFC4B5FD),
       ),
     ),
     cardColor: Color(0xFF24252B),
@@ -518,39 +672,23 @@ class MyTheme {
     splashColor: (isDesktop || isWebDesktop) ? Colors.transparent : null,
     highlightColor: (isDesktop || isWebDesktop) ? Colors.transparent : null,
     splashFactory: (isDesktop || isWebDesktop) ? NoSplash.splashFactory : null,
-    textButtonTheme: (isDesktop || isWebDesktop)
-        ? TextButtonThemeData(
-            style: TextButton.styleFrom(
-              splashFactory: NoSplash.splashFactory,
-              disabledForegroundColor: Colors.white70,
-              foregroundColor: Colors.white70,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18.0),
+    textButtonTheme: TextButtonThemeData(
+      style: glowButtonStyle(filled: false, light: false, radius: 8).copyWith(
+        splashFactory: (isDesktop || isWebDesktop)
+            ? NoSplash.splashFactory
+            : null,
+        padding: (isDesktop || isWebDesktop)
+            ? null
+            : const MaterialStatePropertyAll(
+                EdgeInsets.symmetric(horizontal: mobileTextButtonPaddingLR),
               ),
-            ),
-          )
-        : mobileTextButtonTheme,
-    elevatedButtonTheme: ElevatedButtonThemeData(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: MyTheme.accent,
-        foregroundColor: Colors.white,
-        disabledForegroundColor: Colors.white70,
-        disabledBackgroundColor: Colors.white10,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
-        ),
       ),
     ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: glowButtonStyle(filled: true, light: false),
+    ),
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(
-        backgroundColor: Color(0xFF24252B),
-        side: BorderSide(color: Colors.white12, width: 0.5),
-        disabledForegroundColor: Colors.white70,
-        foregroundColor: Colors.white70,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
-        ),
-      ),
+      style: glowButtonStyle(filled: false, light: false, outline: true),
     ),
     switchTheme: switchTheme(),
     radioTheme: radioTheme(),
@@ -559,9 +697,11 @@ class MyTheme {
     menuBarTheme: MenuBarThemeData(
         style: MenuStyle(
             backgroundColor: MaterialStatePropertyAll(Color(0xFF121212)))),
-    colorScheme: ColorScheme.dark(
-      primary: Colors.blue,
-      secondary: accent,
+    colorScheme: const ColorScheme.dark(
+      primary: Color(0xFFA5B4FF),
+      secondary: Color(0xFFC4B5FD),
+      onPrimary: Color(0xFF0E1024),
+      onSecondary: Color(0xFF1A1030),
       background: Color(0xFF24252B),
     ),
     popupMenuTheme: PopupMenuThemeData(
@@ -3020,8 +3160,18 @@ int versionCmp(String v1, String v2) {
   return bind.versionToNumber(v: v1) - bind.versionToNumber(v: v2);
 }
 
+String _sdaBuiltin(String key, String fallback) {
+  try {
+    final value = bind.mainGetBuildinOption(key: key);
+    if (value.isNotEmpty) {
+      return value;
+    }
+  } catch (_) {}
+  return fallback;
+}
+
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  final name = _sdaBuiltin('display-name', 'Smart Desktop Access');
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
@@ -3731,27 +3881,7 @@ Color? disabledTextColor(BuildContext context, bool enabled) {
 }
 
 Widget loadPowered(BuildContext context) {
-  if (bind.mainGetBuildinOption(key: "hide-powered-by-me") == 'Y') {
-    return SizedBox.shrink();
-  }
-  return MouseRegion(
-    cursor: SystemMouseCursors.click,
-    child: GestureDetector(
-      onTap: () {
-        launchUrl(Uri.parse('https://rustdesk.com'));
-      },
-      child: Opacity(
-          opacity: 0.5,
-          child: Text(
-            translate("powered_by_me"),
-            overflow: TextOverflow.clip,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(fontSize: 9, decoration: TextDecoration.underline),
-          )),
-    ),
-  ).marginOnly(top: 6);
+  return const SizedBox.shrink();
 }
 
 const _kDefaultLogoAsset = 'assets/logo.png';

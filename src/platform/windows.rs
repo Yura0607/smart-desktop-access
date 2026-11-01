@@ -1631,7 +1631,7 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     if get_windows_installer_state(&installed_subkey)? == Some(true) {
         bail!("Cannot install the EXE package over an existing MSI installation");
     }
-    let uninstall_str = get_uninstall(false, false)?;
+    let uninstall_str = get_uninstall(false, false, false)?;
     let mut path = path.trim_end_matches('\\').to_owned();
     let (subkey, _path, start_menu, exe) = get_default_install_info();
     let mut exe = exe;
@@ -1741,7 +1741,9 @@ if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} 
     }
 
     let tray_shortcuts = if config::is_outgoing_only() {
-        "".to_owned()
+        format!(
+            "reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /f /v \"{app_name}\" /t REG_SZ /d \"\\\"{exe}\\\" --tray\""
+        )
     } else {
         format!("
 {tray_shortcut_commands}
@@ -1786,7 +1788,7 @@ reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v Version /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v BuildDate /t REG_SZ /d \"{build_date}\"
 reg add {subkey} /f /v InstallLocation /t REG_SZ /d \"{path}\"
-reg add {subkey} /f /v Publisher /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v Publisher /t REG_SZ /d \"{publisher}\"
 reg add {subkey} /f /v VersionMajor /t REG_DWORD /d {version_major}
 reg add {subkey} /f /v VersionMinor /t REG_DWORD /d {version_minor}
 reg add {subkey} /f /v VersionBuild /t REG_DWORD /d {version_build}
@@ -1805,6 +1807,7 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
     ",
         display_icon = shortcut_icon_location.as_deref().unwrap_or(exe.as_str()),
         nested_exe = escape_nested_cmd_ampersands(&exe),
+        publisher = crate::product::PUBLISHER,
         version = crate::VERSION.replace("-", "."),
         build_date = crate::BUILD_DATE,
         sleep = if debug { "timeout 300" } else { "" },
@@ -1820,6 +1823,11 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
         debug,
         "install",
     )?;
+    if !std::path::Path::new(&exe).is_file() {
+        bail!(
+            "The elevated installer exited without copying the application to {exe}. Windows may have blocked the copy"
+        );
+    }
     run_after_run_cmds(silent);
     Ok(())
 }
@@ -1873,11 +1881,24 @@ fn get_before_uninstall(kill_self: bool) -> ResultType<String> {
 /// The `uninstall_printer` parameter determines whether the command to uninstall the remote printer
 /// is included in the generated uninstall script. If `uninstall_printer` is `false`, the printer
 /// related command is omitted from the script.
-fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String> {
+fn get_uninstall(kill_self: bool, uninstall_printer: bool, quiet: bool) -> ResultType<String> {
     let (subkey, path, start_menu, _) = get_install_info();
     let installer_state = get_windows_installer_state(&subkey)?;
     if let Some(product_code) = get_msi_product_code(&subkey, installer_state)? {
-        return Ok(build_msi_uninstall_command(&product_code));
+        let msi = build_msi_uninstall_command(&product_code, quiet);
+        if !quiet {
+            return Ok(msi);
+        }
+        let app_name = crate::get_app_name();
+        return Ok(format!(
+            "
+    {before}
+    reg delete HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v \"{app_name}\" /f
+    if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
+    {msi}
+    ",
+            before = get_before_uninstall(kill_self)?,
+        ));
     }
     if installer_state == Some(true) {
         bail!("MSI product code was not found in {subkey}");
@@ -1911,6 +1932,10 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     ))
 }
 
+pub fn silent_self_uninstall() -> ResultType<()> {
+    run_cmds(get_uninstall(true, true, true)?, true, "uninstall")
+}
+
 pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
     if is_self_service_running() {
         // This CLI entry is synchronous. Portable builds reuse the retained user configuration.
@@ -1919,7 +1944,7 @@ pub fn uninstall_me(kill_self: bool) -> ResultType<()> {
             .build()?
             .block_on(crate::trusted_devices::config::refresh_from_server())?;
     }
-    run_cmds(get_uninstall(kill_self, true)?, true, "uninstall")
+    run_cmds(get_uninstall(kill_self, true, false)?, true, "uninstall")
 }
 
 fn write_vbs(cmds: String, tip: &str) -> ResultType<PathBuf> {
@@ -3726,10 +3751,11 @@ fn normalize_msi_product_code(value: &str) -> Option<String> {
     Some(format!("{{{}}}", product_code.hyphenated()).to_uppercase())
 }
 
-fn build_msi_uninstall_command(product_code: &str) -> String {
+fn build_msi_uninstall_command(product_code: &str, quiet: bool) -> String {
+    let quiet_flag = if quiet { " /qn" } else { "" };
     format!(
         "set \"RUSTDESK_MSI_EXIT_CODE=\"\n\
-MsiExec.exe /X {product_code} /norestart REBOOT=ReallySuppress\n\
+MsiExec.exe /X {product_code}{quiet_flag} /norestart REBOOT=ReallySuppress\n\
 set \"RUSTDESK_MSI_EXIT_CODE=%ERRORLEVEL%\"\n\
 if \"%RUSTDESK_MSI_EXIT_CODE%\"==\"{MSI_EXIT_SUCCESS_REBOOT_REQUIRED}\" echo MSI uninstall succeeded with a reboot recommendation; continuing without reboot.\n\
 if \"%RUSTDESK_MSI_EXIT_CODE%\"==\"{MSI_EXIT_SUCCESS_REBOOT_INITIATED}\" echo MSI uninstall succeeded with a reboot request; continuing without forcing reboot.\n\
@@ -4071,6 +4097,25 @@ sc delete {app_name}
 )
 }
 
+pub fn set_login_autostart(enabled: bool) {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok((key, _)) =
+        hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+    else {
+        return;
+    };
+    let name = crate::get_app_name();
+    if !enabled {
+        key.delete_value(name).ok();
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let value = format!("\"{}\" --tray", exe.display());
+    key.set_value(name, &value).ok();
+}
+
 fn get_create_service(exe: &str) -> String {
     if config::is_outgoing_only() {
         return "".to_string();
@@ -4186,11 +4231,18 @@ pub fn message_box(text: &str) {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<u16>>();
-    let caption = "RustDesk Output"
+    let caption = crate::product::display_name()
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<u16>>();
-    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), MB_OK) };
+    unsafe {
+        MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_SETFOREGROUND | MB_TOPMOST,
+        )
+    };
 }
 
 pub fn alloc_console() {

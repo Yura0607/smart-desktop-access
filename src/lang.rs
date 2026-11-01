@@ -265,7 +265,7 @@ pub fn translate_locale(name: String, locale: &str) -> String {
                 && !name.starts_with("upgrade_rustdesk_server_pro")
                 && name != "powered_by_me"
             {
-                let app_name = crate::get_app_name();
+                let app_name = crate::product::display_name().to_owned();
                 if !app_name.contains("RustDesk") {
                     s = s.replace("RustDesk", &app_name);
                 } else {
@@ -285,6 +285,9 @@ pub fn translate_locale(name: String, locale: &str) -> String {
                         // Skip replacement to avoid incorrect result.
                     }
                 }
+            }
+            if let Ok(re) = Regex::new(r"https?://(?:www\.)?rustdesk\.com\S*") {
+                s = re.replace_all(&s, crate::product::SOURCE_URL).into_owned();
             }
         }
         s

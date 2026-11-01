@@ -220,6 +220,60 @@ pub fn install_service() -> bool {
     is_installed_daemon(false)
 }
 
+pub fn set_login_autostart(enabled: bool) {
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
+    if home.is_empty() {
+        return;
+    }
+    let label = format!("{}.login", crate::product::bundle_id());
+    let dir = format!("{home}/Library/LaunchAgents");
+    let path = format!("{dir}/{label}.plist");
+    if !enabled {
+        let _ = std::process::Command::new("launchctl")
+            .args(["bootout", &format!("gui/{}", login_uid()), &path])
+            .status();
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(exe) = exe.to_str() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>{label}</string>
+<key>RunAtLoad</key><true/>
+<key>ProgramArguments</key>
+<array><string>{exe}</string><string>--tray</string></array>
+</dict></plist>
+"#
+    );
+    if std::fs::write(&path, body).is_err() {
+        return;
+    }
+    let _ = std::process::Command::new("launchctl")
+        .args(["bootstrap", &format!("gui/{}", login_uid()), &path])
+        .status();
+}
+
+fn login_uid() -> String {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "501".to_owned())
+}
+
 // Remember to check if `update_daemon_agent()` need to be changed if changing `is_installed_daemon()`.
 // No need to merge the existing dup code, because the code in these two functions are too critical.
 // New code should be written in a common function.
@@ -364,11 +418,12 @@ fn update_daemon_agent(agent_plist_file: String, update_source: UpdateSource) ->
 
 fn correct_app_name(s: &str) -> String {
     let mut s = s.to_owned();
-    if let Some(bundleid) = get_bundle_id() {
-        s = s.replace("com.carriez.rustdesk", &bundleid);
-    }
-    s = s.replace("rustdesk", &crate::get_app_name().to_lowercase());
-    s = s.replace("RustDesk", &crate::get_app_name());
+    let bundle = get_bundle_id().unwrap_or_else(|| crate::product::bundle_id().to_owned());
+    s = s.replace("com.carriez.rustdesk", &bundle);
+    // Launchd labels and .app paths use the install name, which has no spaces.
+    let slug = crate::product::install_name();
+    s = s.replace("RustDesk", slug);
+    s = s.replace("rustdesk", &slug.to_lowercase());
     s
 }
 
@@ -419,6 +474,33 @@ pub fn write_plists() -> ResultType<()> {
     write_plist_atomically(&agent_plist_path, &agent_plist_body)?;
     log::info!("[write-plists] Wrote daemon and agent plists");
     Ok(())
+}
+
+pub fn silent_self_uninstall() {
+    set_login_autostart(false);
+    let full = crate::get_full_name();
+    let app = crate::get_app_name();
+    let plists = [
+        format!("/Library/LaunchDaemons/{full}_service.plist"),
+        format!("/Library/LaunchAgents/{full}_server.plist"),
+        format!("/Library/LaunchDaemons/com.carriez.{app}_service.plist"),
+        format!("/Library/LaunchAgents/com.carriez.{app}_server.plist"),
+    ];
+    for plist in &plists {
+        let _ = std::process::Command::new("launchctl")
+            .args(["bootout", "system", plist])
+            .status();
+        let _ = std::process::Command::new("launchctl")
+            .args(["unload", "-w", plist])
+            .status();
+        let _ = std::fs::remove_file(plist);
+    }
+    for name in [crate::product::display_name(), crate::product::install_name()] {
+        let bundle = format!("/Applications/{name}.app");
+        let _ = std::process::Command::new("/bin/rm")
+            .args(["-rf", &bundle])
+            .status();
+    }
 }
 
 pub fn uninstall_service(show_new_window: bool, sync: bool) -> bool {

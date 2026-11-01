@@ -103,23 +103,41 @@ pub fn goto_install() {
     std::process::exit(0);
 }
 
+/// Text for the installer's failure dialog. `cancelled` is a UAC denial.
+pub fn install_failure_message(cancelled: bool, detail: &str) -> String {
+    if cancelled {
+        "Installation was not completed.\n\nWindows did not allow the installer to run. Approve the permission prompt and try again!".to_owned()
+    } else {
+        format!("Installation was not completed.\n\n{detail}!")
+    }
+}
+
 #[inline]
 pub fn install_me(_options: String, _path: String, _silent: bool, _debug: bool) {
     #[cfg(windows)]
     std::thread::spawn(move || {
-        if let Err(err) = crate::platform::windows::install_me(&_options, _path, _silent, _debug) {
+        use std::error::Error;
+        let result = crate::platform::windows::install_me(&_options, _path, _silent, _debug);
+        if let Err(err) = &result {
             log::error!("Installation failed: {err:#}");
-            if !_silent
-                && !err
-                    .downcast_ref::<::windows::core::Error>()
-                    .is_some_and(|err| {
-                        err.code() == ::windows::Win32::Foundation::ERROR_CANCELLED.to_hresult()
-                    })
-            {
-                crate::platform::windows::message_box(&format!("Installation failed:\n{err:#}!"));
+            if !_silent {
+                // A wrapped ERROR_CANCELLED used to skip the dialog and then
+                // exit, so the window closed with nothing installed.
+                let cancelled = err.chain().any(|cause| {
+                    cause
+                        .downcast_ref::<::windows::core::Error>()
+                        .is_some_and(|werr| {
+                            werr.code()
+                                == ::windows::Win32::Foundation::ERROR_CANCELLED.to_hresult()
+                        })
+                });
+                crate::platform::windows::message_box(&install_failure_message(
+                    cancelled,
+                    &format!("{err:#}"),
+                ));
             }
         }
-        std::process::exit(0);
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
     });
 }
 
@@ -488,6 +506,11 @@ pub fn set_option(key: String, value: String) {
                 return;
             }
         }
+    } else if key == "start-at-login" {
+        #[cfg(windows)]
+        crate::platform::windows::set_login_autostart(value != "N");
+        #[cfg(target_os = "macos")]
+        crate::platform::macos::set_login_autostart(value != "N");
     } else if &key == "audio-input" {
         #[cfg(not(target_os = "ios"))]
         crate::audio_service::restart();
@@ -1791,5 +1814,16 @@ mod tests {
             None
         );
         assert_eq!(validate_windows_service_video_save_directory("  "), None);
+    }
+
+    #[test]
+    fn install_failure_message_names_a_denied_elevation() {
+        let cancelled = super::install_failure_message(true, "ignored");
+        assert!(cancelled.contains("Windows did not allow the installer to run"));
+        assert!(cancelled.ends_with('!'));
+        assert!(!cancelled.contains("Powered by"));
+        let failed = super::install_failure_message(false, "copy failed");
+        assert!(failed.contains("copy failed"));
+        assert!(failed.contains("Installation was not completed"));
     }
 }

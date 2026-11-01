@@ -1,13 +1,9 @@
 name: Flutter Tag Build
 
 on:
+  # Product releases use sda-release.yml (tags sda-v*). This upstream tag
+  # matrix is manual only, so a version tag does not start a signed build.
   workflow_dispatch:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+-[0-9]+'
 
 jobs:
   run-flutter-tag-build:

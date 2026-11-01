@@ -498,6 +498,18 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         windowOnTop(windowId());
       }
       return jumpOk;
+    } else if (call.method == 'sda_close_session') {
+      final id = '${call.arguments ?? ''}';
+      if (id.isEmpty) {
+        return false;
+      }
+      final hasTab =
+          tabController.state.value.tabs.any((tab) => tab.key == id);
+      if (!hasTab) {
+        return false;
+      }
+      tabController.closeBy(id);
+      return true;
     } else if (call.method == kWindowEventGetRemoteList) {
       return tabController.state.value.tabs
           .map((e) => e.key)
