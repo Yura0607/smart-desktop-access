@@ -19,8 +19,12 @@ sign_leaf() {
   codesign --force --sign - --timestamp=none "$1"
 }
 
+# codesign treats the bundle's main executable as the bundle. Signing it
+# before helpers such as Contents/MacOS/service fails with "not signed at all".
+main_exe="$app_path/Contents/MacOS/$(basename "$app_path" .app)"
+
 while IFS= read -r -d '' path; do
-  if [[ "$path" == "$app_path" ]]; then
+  if [[ "$path" == "$app_path" || "$path" == "$main_exe" ]]; then
     continue
   fi
   if [[ -f "$path" ]] && file -b "$path" | grep -q 'Mach-O'; then
