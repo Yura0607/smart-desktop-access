@@ -13,10 +13,11 @@ pub const SERVER_HOST: &str = "smartdesktopaccess.duckdns.org";
 /// hbbs public key (`-k` / `id_ed25519.pub`).
 pub const SERVER_PUBLIC_KEY: &str = "IZnoUoa33KdpLzeQLzosH7I8oo6vRNVjv8MxezPM5Rc=";
 /// Account login. Caddy on 443 proxies this host to rustdesk-api.
-pub const API_SERVER: &str = concat!("https://", SERVER_HOST);
+/// Written out in full: `concat!` cannot take `SERVER_HOST` on the CI toolchain.
+pub const API_SERVER: &str = "https://smartdesktopaccess.duckdns.org";
 /// Companion API. Caddy strips the `/companion` prefix and proxies to the
 /// companion process.
-pub const COMPANION_URL: &str = concat!("https://", SERVER_HOST, "/companion");
+pub const COMPANION_URL: &str = "https://smartdesktopaccess.duckdns.org/companion";
 /// Shown as the Windows publisher / company. Not the install folder name.
 pub const PUBLISHER: &str = "Smart Desktop Access";
 pub const LEGAL_COPYRIGHT: &str = "Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0";
