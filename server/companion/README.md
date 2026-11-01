@@ -89,4 +89,6 @@ hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old 
 
 `PATCH /api/v1/devices/<id>` — same header, body `{"alias": "Front desk"}`. Empty alias clears the name. A later client registration does not replace it.
 
+`POST /api/v1/clients` — same header, body `{"name", "email", "note"}`. Creates a pending record and a short invite code. `POST /api/v1/clients/<invite>/email` sends the install mail. The download links are `https://smartdesktopaccess.duckdns.org/companion/d/<invite>/windows` (and `mac`, `mac-intel`) and redirect to the GitHub installers. The person does not type the code. When the installed client registers with the same email address, ignoring capitals, the pending record becomes that device and keeps the name. `DELETE /api/v1/clients/<invite>` removes a pending record.
+
 Registration is open on purpose: the client program cannot keep a secret. After the first registration the device token blocks overwrites. Do not put the admin token in the client build.

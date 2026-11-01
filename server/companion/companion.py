@@ -33,6 +33,8 @@ RATE_WINDOW_SECONDS = 60.0
 MAX_EMAIL_LEN = 254
 MAX_HOSTNAME_LEN = 128
 MAX_ID_LEN = 64
+MAX_NOTE_LEN = 500
+INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
 def now() -> int:
@@ -119,6 +121,13 @@ class Store:
             password = str(payload.get("password") or current.get("password") or "")
             # The client must not replace a name the admin set.
             alias = str(current.get("alias") or "").strip()
+            invite = str(current.get("invite") or "").strip()
+            note = str(current.get("note") or "")
+            linked = None if invite else self._pop_pending_locked(data, email)
+            if linked:
+                alias = str(linked.get("alias") or alias)
+                invite = str(linked.get("invite") or "")
+                note = str(linked.get("note") or note)
             record = {
                 "id": device_id,
                 "hostname": str(payload.get("hostname") or current.get("hostname") or ""),
@@ -132,6 +141,10 @@ class Store:
             }
             if alias:
                 record["alias"] = alias
+            if invite:
+                record["invite"] = invite
+            if note:
+                record["note"] = note
             devices[device_id] = record
             self._write(data)
             return dict(devices[device_id])
@@ -153,6 +166,79 @@ class Store:
             )
         )
         return rows
+
+    def _pop_pending_locked(self, data: dict[str, Any], email: str) -> dict[str, Any] | None:
+        target = email.casefold()
+        if not target:
+            return None
+        pending = data.setdefault("pending", {})
+        matches = [
+            (code, row)
+            for code, row in pending.items()
+            if str(row.get("email") or "").casefold() == target
+        ]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: int(item[1].get("created") or 0))
+        code, row = matches[0]
+        pending.pop(code, None)
+        return row
+
+    def create_pending(self, name: str, email: str, note: str) -> dict[str, Any]:
+        name = name.strip()
+        email = email.strip()
+        note = note.strip()
+        if not name or len(name) > 80 or any(ch in name for ch in "\r\n\x00"):
+            raise ValueError("invalid name")
+        if not email or not valid_email(email):
+            raise ValueError("invalid email")
+        if len(note) > MAX_NOTE_LEN or "\x00" in note:
+            raise ValueError("invalid note")
+        with self._lock:
+            data = self._read()
+            pending = data.setdefault("pending", {})
+            invite = ""
+            for _ in range(20):
+                candidate = "".join(secrets.choice(INVITE_ALPHABET) for _ in range(6))
+                if candidate not in pending:
+                    invite = candidate
+                    break
+            if not invite:
+                raise ValueError("could not allocate invite")
+            row = {
+                "id": invite,
+                "invite": invite,
+                "alias": name,
+                "email": email,
+                "note": note,
+                "pending": True,
+                "created": now(),
+            }
+            pending[invite] = row
+            self._write(data)
+            return dict(row)
+
+    def list_pending(self) -> list[dict[str, Any]]:
+        with self._lock:
+            pending = self._read().get("pending", {})
+        rows = [dict(row) for row in pending.values()]
+        rows.sort(key=lambda row: int(row.get("created") or 0))
+        return rows
+
+    def delete_pending(self, invite: str) -> bool:
+        with self._lock:
+            data = self._read()
+            pending = data.get("pending", {})
+            if invite not in pending:
+                return False
+            pending.pop(invite, None)
+            self._write(data)
+            return True
+
+    def get_pending(self, invite: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._read().get("pending", {}).get(invite)
+        return dict(row) if isinstance(row, dict) else None
 
     def set_alias(self, device_id: str, alias: str) -> dict[str, Any] | None:
         alias = alias.strip()
@@ -194,12 +280,12 @@ class Smtp:
     def configured(self) -> bool:
         return bool(self.host and self.sender)
 
-    def send(self, recipient: str) -> None:
+    def send(self, recipient: str, text: str | None = None) -> None:
         message = EmailMessage()
         message["Subject"] = email_text.SUBJECT
         message["From"] = self.sender
         message["To"] = recipient
-        message.set_content(email_text.body())
+        message.set_content(text if text is not None else email_text.body())
         if self.mode == "ssl":
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(self.host, self.port, context=context, timeout=30) as smtp:
@@ -219,6 +305,13 @@ class Smtp:
             smtp.login(self.user, self.password)
 
 
+def _download_target(path: str) -> str:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) != 3 or parts[0] != "d":
+        return ""
+    return email_text.direct_url(parts[2])
+
+
 def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimiter):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
@@ -232,7 +325,7 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
             self.end_headers()
             self.wfile.write(data)
 
@@ -287,6 +380,13 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 else:
                     self._send(404, {"error": "missing"})
                 return
+            download = _download_target(path)
+            if download:
+                self.send_response(302)
+                self.send_header("Location", download)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if path == "/api/v1/health":
                 self._send(200, {"ok": True, "smtp": smtp.configured})
                 return
@@ -296,7 +396,7 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 if not self._authorized():
                     self._send(401, {"error": "unauthorized"})
                     return
-                self._send(200, {"devices": store.list_devices()})
+                self._send(200, {"devices": store.list_devices(), "pending": store.list_pending()})
                 return
             self._send(404, {"error": "not found"})
 
@@ -306,6 +406,23 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 payload = self._json()
             except (ValueError, json.JSONDecodeError):
                 self._send(400, {"error": "bad json"})
+                return
+            if path == "/api/v1/clients":
+                if self._too_fast("admin"):
+                    return
+                if not self._authorized():
+                    self._send(401, {"error": "unauthorized"})
+                    return
+                try:
+                    created = store.create_pending(
+                        str(payload.get("name") or ""),
+                        str(payload.get("email") or ""),
+                        str(payload.get("note") or ""),
+                    )
+                except ValueError as err:
+                    self._send(400, {"error": str(err)})
+                    return
+                self._send(200, created)
                 return
             if path == "/api/v1/devices":
                 if self._too_fast("register"):
@@ -357,7 +474,59 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 letter["sent"] = True
                 self._send(200, letter)
                 return
+            if path.startswith("/api/v1/clients/") and path.endswith("/email"):
+                if self._too_fast("admin"):
+                    return
+                if not self._authorized():
+                    self._send(401, {"error": "unauthorized"})
+                    return
+                invite = path[len("/api/v1/clients/") : -len("/email")].strip("/")
+                pending = store.get_pending(invite)
+                if pending is None:
+                    self._send(404, {"error": "unknown client"})
+                    return
+                recipient = str(pending.get("email") or "").strip()
+                text = email_text.body(invite)
+                letter = {
+                    "ok": True,
+                    "to": recipient,
+                    "subject": email_text.SUBJECT,
+                    "body": text,
+                    "mailto": email_text.mailto(recipient, invite),
+                }
+                if not smtp.configured:
+                    letter["sent"] = False
+                    letter["fallback"] = "mailto"
+                    self._send(200, letter)
+                    return
+                try:
+                    smtp.send(recipient, text)
+                except Exception:
+                    letter["sent"] = False
+                    letter["fallback"] = "mailto"
+                    self._send(200, letter)
+                    return
+                letter["sent"] = True
+                self._send(200, letter)
+                return
             self._send(404, {"error": "not found"})
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            prefix = "/api/v1/clients/"
+            if not path.startswith(prefix) or "/" in path[len(prefix) :].strip("/"):
+                self._send(404, {"error": "not found"})
+                return
+            if self._too_fast("admin"):
+                return
+            if not self._authorized():
+                self._send(401, {"error": "unauthorized"})
+                return
+            invite = path[len(prefix) :].strip("/")
+            if not store.delete_pending(invite):
+                self._send(404, {"error": "unknown client"})
+                return
+            self._send(200, {"ok": True})
 
         def do_PATCH(self) -> None:  # noqa: N802
             path = urlparse(self.path).path

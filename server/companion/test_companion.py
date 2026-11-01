@@ -139,6 +139,72 @@ class CompanionTest(unittest.TestCase):
         self.assertEqual(device["alias"], "Front desk")
         self.assertEqual(device["hostname"], "Office-PC-2")
 
+    def test_pending_client_links_by_email(self):
+        status, denied = self.request(
+            "POST",
+            "/api/v1/clients",
+            {"name": "Front desk", "email": "Mary@Example.com"},
+        )
+        self.assertEqual(status, 401)
+        status, pending = self.request(
+            "POST",
+            "/api/v1/clients",
+            {"name": "Front desk", "email": "Mary@Example.com", "note": "lobby"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(pending["pending"])
+        self.assertEqual(pending["alias"], "Front desk")
+        invite = pending["invite"]
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["pending"][0]["id"], invite)
+        status, created = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "password": "pw",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["pending"], [])
+        device = listed["devices"][0]
+        self.assertEqual(device["alias"], "Front desk")
+        self.assertEqual(device["invite"], invite)
+        self.assertEqual(device["note"], "lobby")
+        status, again = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Office-PC",
+                "email": "mary@example.com",
+                "device_token": created["device_token"],
+                "alias": "from the client",
+            },
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["devices"][0]["alias"], "Front desk")
+        status, extra = self.request(
+            "POST",
+            "/api/v1/clients",
+            {"name": "Spare", "email": "spare@example.com"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, removed = self.request(
+            "DELETE",
+            "/api/v1/clients/" + extra["invite"],
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(listed["pending"], [])
+
     def test_invalid_email_and_register_rate_limit(self):
         status, body = self.request(
             "POST",

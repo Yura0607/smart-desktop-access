@@ -24,9 +24,25 @@ class SdaClient {
   String get password => '${json['password'] ?? ''}';
   String get platform => '${json['platform'] ?? ''}';
   String get alias => '${json['alias'] ?? ''}'.trim();
+  String get invite => '${json['invite'] ?? json['id'] ?? ''}'.trim();
+  bool get pending => json['pending'] == true;
   bool get online => json['online'] == true;
   String get label =>
       alias.isNotEmpty ? alias : (hostname.isEmpty ? id : hostname);
+}
+
+bool _validEmail(String value) {
+  if (value.length > 254 || value.contains(' ') || value.contains('\n')) {
+    return false;
+  }
+  final at = value.indexOf('@');
+  if (at <= 0 || at != value.lastIndexOf('@')) {
+    return false;
+  }
+  final domain = value.substring(at + 1);
+  return domain.contains('.') &&
+      !domain.startsWith('.') &&
+      !domain.endsWith('.');
 }
 
 class SdaClientsPage extends StatefulWidget {
@@ -39,6 +55,7 @@ class SdaClientsPage extends StatefulWidget {
 class _SdaClientsPageState extends State<SdaClientsPage> {
   Timer? _timer;
   List<SdaClient> _clients = [];
+  List<SdaClient> _pending = [];
   String _error = '';
   bool _loading = true;
   final _tokenController = TextEditingController();
@@ -105,9 +122,13 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
       final list = (body['devices'] as List? ?? [])
           .map((item) => SdaClient(Map<String, dynamic>.from(item as Map)))
           .toList();
+      final waiting = (body['pending'] as List? ?? [])
+          .map((item) => SdaClient(Map<String, dynamic>.from(item as Map)))
+          .toList();
       if (mounted) {
         setState(() {
           _clients = list;
+          _pending = waiting;
           _loading = false;
           _error = '';
         });
@@ -232,6 +253,133 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     }
   }
 
+  Future<void> _createClient() async {
+    final name = TextEditingController();
+    final email = TextEditingController();
+    final note = TextEditingController();
+    final created = await showDialog<SdaClient>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('New client'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: name,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Name'),
+            ),
+            TextField(
+              controller: email,
+              decoration: const InputDecoration(labelText: 'Email'),
+            ),
+            TextField(
+              controller: note,
+              decoration: const InputDecoration(labelText: 'Note (optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final chosenName = name.text.trim();
+              final chosenEmail = email.text.trim();
+              if (chosenName.isEmpty || !_validEmail(chosenEmail)) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Enter a name and a valid email address.'),
+                ));
+                return;
+              }
+              final token = bind.mainGetLocalOption(key: _tokenKey);
+              try {
+                final response = await http.post(
+                  Uri.parse(sdaCompanionApi('/api/v1/clients')),
+                  headers: {
+                    'Authorization': 'Bearer $token',
+                    'Content-Type': 'application/json',
+                  },
+                  body: jsonEncode({
+                    'name': chosenName,
+                    'email': chosenEmail,
+                    'note': note.text.trim(),
+                  }),
+                );
+                if (response.statusCode == 200) {
+                  final body =
+                      jsonDecode(response.body) as Map<String, dynamic>;
+                  if (context.mounted) {
+                    Navigator.pop(context, SdaClient(body));
+                  }
+                  return;
+                }
+              } catch (_) {}
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Could not save this client.'),
+                ));
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    name.dispose();
+    email.dispose();
+    note.dispose();
+    if (created == null) {
+      return;
+    }
+    await _refresh();
+    if (!mounted) {
+      return;
+    }
+    final send = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(created.label),
+        content: const Text(
+            'Waiting for install. Send the Windows and Mac download links now?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Later'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send email'),
+          ),
+        ],
+      ),
+    );
+    if (send == true) {
+      await _sendEmail(created);
+    }
+  }
+
+  Future<void> _deletePending(SdaClient client) async {
+    final token = bind.mainGetLocalOption(key: _tokenKey);
+    try {
+      final response = await http.delete(
+        Uri.parse(sdaCompanionApi('/api/v1/clients/${client.invite}')),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        await _refresh();
+        return;
+      }
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not delete this client.'),
+      ));
+    }
+  }
+
   Future<void> _sendEmail(SdaClient client) async {
     if (client.email.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -242,7 +390,9 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
     final token = bind.mainGetLocalOption(key: _tokenKey);
     try {
       final response = await http.post(
-        Uri.parse(sdaCompanionApi('/api/v1/devices/${client.id}/email')),
+        Uri.parse(sdaCompanionApi(client.pending
+            ? '/api/v1/clients/${client.invite}/email'
+            : '/api/v1/devices/${client.id}/email')),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -287,6 +437,17 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_showToken) _tokenCard(),
+        if (!_showToken)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: TextButton(
+                onPressed: _createClient,
+                child: const Text('New client'),
+              ),
+            ),
+          ),
         if (fresh.isNotEmpty)
           MaterialBanner(
             content: Text(fresh.length == 1
@@ -303,14 +464,17 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
             child: Text(_error),
           ),
         Expanded(
-          child: _loading && _clients.isEmpty
+          child: _loading && _clients.isEmpty && _pending.isEmpty
               ? const Center(child: CircularProgressIndicator())
               : ListView.separated(
-                  itemCount: _clients.length,
+                  itemCount: _pending.length + _clients.length,
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
-                    final client = _clients[index];
-                    final isNew = !_known.contains(client.id);
+                    final client = index < _pending.length
+                        ? _pending[index]
+                        : _clients[index - _pending.length];
+                    final isNew =
+                        !client.pending && !_known.contains(client.id);
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -328,11 +492,16 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                             ],
                           ),
                           subtitle: Text(
-                            [
-                              if (client.email.isNotEmpty) client.email,
-                              'ID ${client.id}',
-                              client.online ? 'Online' : 'Offline',
-                            ].join(' · '),
+                            client.pending
+                                ? [
+                                    'Waiting for install',
+                                    if (client.email.isNotEmpty) client.email,
+                                  ].join(' · ')
+                                : [
+                                    if (client.email.isNotEmpty) client.email,
+                                    'ID ${client.id}',
+                                    client.online ? 'Online' : 'Offline',
+                                  ].join(' · '),
                           ),
                           leading: Icon(
                             Icons.circle,
@@ -353,26 +522,35 @@ class _SdaClientsPageState extends State<SdaClientsPage> {
                           child: Wrap(
                             spacing: 4,
                             children: [
-                              TextButton(
-                                onPressed: () => _connect(client),
-                                child: const Text('Connect'),
-                              ),
-                              TextButton(
-                                onPressed: () => _transferFiles(client),
-                                child: const Text('Files'),
-                              ),
-                              TextButton(
-                                onPressed: () => _disconnect(client),
-                                child: const Text('Disconnect'),
-                              ),
+                              if (!client.pending)
+                                TextButton(
+                                  onPressed: () => _connect(client),
+                                  child: const Text('Connect'),
+                                ),
+                              if (!client.pending)
+                                TextButton(
+                                  onPressed: () => _transferFiles(client),
+                                  child: const Text('Files'),
+                                ),
+                              if (!client.pending)
+                                TextButton(
+                                  onPressed: () => _disconnect(client),
+                                  child: const Text('Disconnect'),
+                                ),
                               TextButton(
                                 onPressed: () => _sendEmail(client),
                                 child: const Text('Send email'),
                               ),
-                              TextButton(
-                                onPressed: () => _rename(client),
-                                child: const Text('Rename'),
-                              ),
+                              if (!client.pending)
+                                TextButton(
+                                  onPressed: () => _rename(client),
+                                  child: const Text('Rename'),
+                                ),
+                              if (client.pending)
+                                TextButton(
+                                  onPressed: () => _deletePending(client),
+                                  child: const Text('Delete'),
+                                ),
                             ],
                           ),
                         ),
