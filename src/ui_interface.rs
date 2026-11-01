@@ -506,6 +506,11 @@ pub fn set_option(key: String, value: String) {
                 return;
             }
         }
+    } else if key == "start-at-login" {
+        #[cfg(windows)]
+        crate::platform::windows::set_login_autostart(value != "N");
+        #[cfg(target_os = "macos")]
+        crate::platform::macos::set_login_autostart(value != "N");
     } else if &key == "audio-input" {
         #[cfg(not(target_os = "ios"))]
         crate::audio_service::restart();

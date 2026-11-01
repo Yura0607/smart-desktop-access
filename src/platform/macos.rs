@@ -220,6 +220,60 @@ pub fn install_service() -> bool {
     is_installed_daemon(false)
 }
 
+pub fn set_login_autostart(enabled: bool) {
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
+    if home.is_empty() {
+        return;
+    }
+    let label = format!("{}.login", crate::product::bundle_id());
+    let dir = format!("{home}/Library/LaunchAgents");
+    let path = format!("{dir}/{label}.plist");
+    if !enabled {
+        let _ = std::process::Command::new("launchctl")
+            .args(["bootout", &format!("gui/{}", login_uid()), &path])
+            .status();
+        let _ = std::fs::remove_file(&path);
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(exe) = exe.to_str() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let body = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>{label}</string>
+<key>RunAtLoad</key><true/>
+<key>ProgramArguments</key>
+<array><string>{exe}</string><string>--tray</string></array>
+</dict></plist>
+"#
+    );
+    if std::fs::write(&path, body).is_err() {
+        return;
+    }
+    let _ = std::process::Command::new("launchctl")
+        .args(["bootstrap", &format!("gui/{}", login_uid()), &path])
+        .status();
+}
+
+fn login_uid() -> String {
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "501".to_owned())
+}
+
 // Remember to check if `update_daemon_agent()` need to be changed if changing `is_installed_daemon()`.
 // No need to merge the existing dup code, because the code in these two functions are too critical.
 // New code should be written in a common function.

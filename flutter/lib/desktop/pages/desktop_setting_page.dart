@@ -528,6 +528,10 @@ class _GeneralState extends State<_General> {
     final showAutoUpdate = (isWindows && bind.mainIsInstalled()) ||
     (isMacOS && bind.mainIsInstalled() && bind.mainIsInstalledDaemon(prompt: false) && !bind.isCustomClient());
     final children = <Widget>[
+      if (!isWeb && outgoingOnly && isWindows)
+        _OptionCheckBox(context, 'Start with Windows', 'start-at-login'),
+      if (!isWeb && outgoingOnly && isMacOS)
+        _OptionCheckBox(context, 'Start at login', 'start-at-login'),
       if (!isWeb && !incomingOnly)
         _OptionCheckBox(context, 'Confirm before closing multiple tabs',
             kOptionEnableConfirmClosingTabs,

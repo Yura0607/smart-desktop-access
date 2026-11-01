@@ -1741,7 +1741,9 @@ if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} 
     }
 
     let tray_shortcuts = if config::is_outgoing_only() {
-        "".to_owned()
+        format!(
+            "reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /f /v \"{app_name}\" /t REG_SZ /d \"\\\"{exe}\\\" --tray\""
+        )
     } else {
         format!("
 {tray_shortcut_commands}
@@ -4075,6 +4077,25 @@ sc delete {app_name}
 ",
     app_name = crate::get_app_name(),
 )
+}
+
+pub fn set_login_autostart(enabled: bool) {
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok((key, _)) =
+        hkcu.create_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+    else {
+        return;
+    };
+    let name = crate::get_app_name();
+    if !enabled {
+        key.delete_value(name).ok();
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let value = format!("\"{}\" --tray", exe.display());
+    key.set_value(name, &value).ok();
 }
 
 fn get_create_service(exe: &str) -> String {

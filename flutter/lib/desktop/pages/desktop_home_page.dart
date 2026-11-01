@@ -48,6 +48,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsCanScreenRecording = false;
   var watchIsProcessTrust = false;
   var watchIsInputMonitoring = false;
+  var loginServicePrompted = false;
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
   bool isCardClosed = false;
@@ -527,9 +528,14 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           !svcStopped.value &&
           bind.mainIsInstalled() &&
           !bind.mainIsInstalledDaemon(prompt: false)) {
-        return buildInstallCard("", "install_daemon_tip", "Install", () async {
-          bind.mainIsInstalledDaemon(prompt: true);
-        });
+        if (!loginServicePrompted) {
+          loginServicePrompted = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            bind.mainIsInstalledDaemon(prompt: true);
+          });
+        }
+        return buildInstallCard(
+            "", "install_daemon_tip", "", () {});
       }
       //// Disable microphone configuration for macOS. We will request the permission when needed.
       // else if ((await osxCanRecordAudio() !=

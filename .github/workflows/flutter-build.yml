@@ -490,7 +490,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk --app-name "$env:SDA_EXE_NAME" --manufacturer "$env:SDA_MANUFACTURER"
+          $connType = if ($env:SDA_VARIANT -eq 'admin') { 'outgoing' } else { 'incoming' }
+          python preprocess.py --arp -d ../../rustdesk --app-name "$env:SDA_EXE_NAME" --manufacturer "$env:SDA_MANUFACTURER" --conn-type $connType
           nuget restore msi.sln
           $msiPlatform = if ('${{ matrix.job.arch }}' -eq 'aarch64') { 'ARM64' } else { 'x64' }
           msbuild msi.sln -p:Configuration=Release -p:Platform=$msiPlatform /p:TargetVersion=Windows10

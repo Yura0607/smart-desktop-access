@@ -216,6 +216,12 @@ pub fn core_main() -> Option<CoreMainAction> {
             crate::platform::try_remove_temp_update_files();
             hbb_common::config::PeerConfig::preload_peers();
         }
+        #[cfg(any(windows, target_os = "macos"))]
+        if hbb_common::config::is_outgoing_only()
+            && hbb_common::config::Config::get_option("start-at-login") != "N"
+        {
+            crate::platform::set_login_autostart(true);
+        }
         std::thread::spawn(move || crate::start_server(false, no_server));
     } else {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
