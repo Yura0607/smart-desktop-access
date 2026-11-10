@@ -57,6 +57,14 @@ Removed or deactivated companion devices are deleted from that managed set (rows
 
 `/api/server-config` then returns those peers to the bundled web client. A small patch in rustdesk-api's web JS (`resources/web/js/src/ljw.js`, `connection.ts`, and `resources/web/js/dist/index.js`) stores the decoded hash as `plainpwd` and, when the remote sends its salt, calls `login(plainpwd)` so the password is hashed with the live salt and challenge. Putting the raw password bytes in the remembered `password` field skips the salt step and the remote answers "Wrong Password".
 
+That same JS must not reload the page just because a successful login wrote a remembered `password` back into the peer. Doing so tore down the relay after "Connected, waiting for image..." (the Flutter splash came back and the list returned, with `WebSock.onclose` and a leftover `VideoFrame` warning). `getServerConf` now updates `plainpwd` in place, skips the fetch while a session (`window.curConn`) is live, and never calls `location.reload()` during an active or just-started connection.
+
+Companion "Connect in browser" opens `/webclient/#/?id=<id>` (and may set `sessionStorage` `sda-connect-id` / `sda-connect-plainpwd` or `postMessage` `{source:'sda-companion', type:'sda-connect'}`). Flutter rewrites the hash to `#/`, so the client also copies the id into `sessionStorage` and calls `setByName('connect', id)` after the address book has been applied.
+
+Safari / iPadOS (desktop UA included) often reports WASM SIMD but the SIMD VP9 decoder does not produce frames. The loader uses the non-SIMD `OGVDecoderVideoVP9W` build there and disables `threading` (it needs `SharedArrayBuffer`). Frames that arrive before the decoder is ready are ignored instead of throwing.
+
+Once the first video frame arrives, the client sends a single Shift key (not Enter, and not any password or PIN) so a locked Windows PC drops the lock-screen clock and shows the sign-in field. On iPad the session toolbar includes the on-screen keyboard; Ctrl+Alt+Del is in the overflow menu (`Insert Ctrl + Alt + Del`) and calls the existing `ctrl_alt_del` handler.
+
 The old `/webclient2/` path (removed upstream) is served from `/var/www/sda-webclient2/index.html` so `/_admin/` "Web Client" links of the form `/webclient2/#/<id>` redirect to `/webclient/#/?id=<id>`.
 
 ## Companion pages
