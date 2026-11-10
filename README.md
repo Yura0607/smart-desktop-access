@@ -27,7 +27,7 @@ Send email uses the SMTP account in `/etc/sda-companion.env`. If that is empty, 
 
 ## Web
 
-[docs/WEB.md](docs/WEB.md) describes the browser admin that the companion serves, and what is still missing for a view-only browser client. A browser cannot control the remote mouse or keyboard. The person at the computer must agree each time a screen is shown.
+[docs/WEB.md](docs/WEB.md) describes the browser admin that the companion serves and the web client. Requirement: the web client gives full remote control (screen, mouse, keyboard, and everything else) from any browser on iPad, phones, Mac and Windows. It is not view-only. The native admin app stays as it is. See [REQUIREMENTS.md](REQUIREMENTS.md).
 
 ## Build on a workstation
 
