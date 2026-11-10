@@ -47,7 +47,7 @@ async fn register_once() -> Result<(), String> {
     }
     let password = ensure_password()?;
     let email = Config::get_option(EMAIL_OPTION);
-    let token = read_state(TOKEN_FILE).unwrap_or_default();
+    let token = read_state(TOKEN_FILE)?.unwrap_or_default();
     let body = serde_json::json!({
         "id": id,
         "hostname": machine_name(),
@@ -82,7 +82,7 @@ async fn register_once() -> Result<(), String> {
             }
         }
         if value.get("deactivated").and_then(|v| v.as_bool()) == Some(true) {
-            let token = read_state(TOKEN_FILE).unwrap_or_default();
+            let token = read_state(TOKEN_FILE)?.unwrap_or_default();
             acknowledge_deactivated(&client, &id, &token).await?;
             schedule_self_uninstall();
             return Err("uninstalling".to_owned());
@@ -127,7 +127,7 @@ fn schedule_self_uninstall() {
 }
 
 fn ensure_password() -> Result<String, String> {
-    if let Some(existing) = read_state(PASSWORD_FILE) {
+    if let Some(existing) = read_state(PASSWORD_FILE)? {
         if !existing.is_empty() {
             return Ok(existing);
         }
@@ -150,10 +150,69 @@ fn state_path(name: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn read_state(name: &str) -> Option<String> {
-    let path = state_path(name).ok()?;
-    let text = fs::read_to_string(path).ok()?;
-    let text = text.trim().to_owned();
+fn read_state(name: &str) -> Result<Option<String>, String> {
+    let path = state_path(name)?;
+    let raw = match fs::read(&path) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.to_string()),
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    #[cfg(windows)]
+    {
+        match dpapi_unprotect(&raw) {
+            Ok(plain) => return Ok(normalize_state(&plain)),
+            Err(err) => {
+                if let Some(legacy) = legacy_plaintext(&raw) {
+                    // Older builds stored this file in plaintext. Re-save it with DPAPI.
+                    if let Err(write_err) = write_state(name, &legacy) {
+                        log::warn!(
+                            "Migrated companion {name} from plaintext but could not re-encrypt: {write_err}"
+                        );
+                    }
+                    return Ok(normalize_state(legacy.as_bytes()));
+                }
+                return Err(err);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(normalize_state(&raw))
+    }
+}
+
+fn write_state(name: &str, value: &str) -> Result<(), String> {
+    let path = state_path(name)?;
+    let payload = {
+        #[cfg(windows)]
+        {
+            dpapi_protect(value.as_bytes())?
+        }
+        #[cfg(not(windows))]
+        {
+            value.as_bytes().to_vec()
+        }
+    };
+    let mut file = fs::File::create(&path).map_err(|err| err.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = file.set_permissions(fs::Permissions::from_mode(0o600));
+    }
+    file.write_all(&payload).map_err(|err| err.to_string())?;
+    drop(file);
+    #[cfg(windows)]
+    {
+        restrict_windows_acl(&path);
+    }
+    Ok(())
+}
+
+fn normalize_state(raw: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(raw).ok()?.trim().to_owned();
     if text.is_empty() {
         None
     } else {
@@ -161,17 +220,119 @@ fn read_state(name: &str) -> Option<String> {
     }
 }
 
-fn write_state(name: &str, value: &str) -> Result<(), String> {
-    let path = state_path(name)?;
-    let mut file = fs::File::create(&path).map_err(|err| err.to_string())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = file.set_permissions(fs::Permissions::from_mode(0o600));
+fn legacy_plaintext(raw: &[u8]) -> Option<String> {
+    if raw.is_empty() || raw.contains(&0) {
+        return None;
     }
-    file.write_all(value.as_bytes())
-        .map_err(|err| err.to_string())?;
-    Ok(())
+    let text = std::str::from_utf8(raw).ok()?;
+    if text
+        .chars()
+        .any(|ch| ch.is_control() && ch != '\n' && ch != '\r' && ch != '\t')
+    {
+        return None;
+    }
+    Some(text.to_string())
+}
+
+#[cfg(windows)]
+fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
+    use std::ptr;
+    use winapi::um::dpapi::{CryptProtectData, CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN};
+    use winapi::um::wincrypt::DATA_BLOB;
+
+    let mut input = DATA_BLOB {
+        cbData: plain.len() as u32,
+        pbData: plain.as_ptr() as *mut u8,
+    };
+    let mut output = DATA_BLOB {
+        cbData: 0,
+        pbData: ptr::null_mut(),
+    };
+    let ok = unsafe {
+        CryptProtectData(
+            &mut input,
+            ptr::null(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+    };
+    if ok == 0 {
+        return Err("CryptProtectData failed".to_string());
+    }
+    Ok(unsafe { take_data_blob(&mut output) })
+}
+
+#[cfg(windows)]
+fn dpapi_unprotect(blob: &[u8]) -> Result<Vec<u8>, String> {
+    use std::ptr;
+    use winapi::um::dpapi::{CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN};
+    use winapi::um::wincrypt::DATA_BLOB;
+
+    let mut input = DATA_BLOB {
+        cbData: blob.len() as u32,
+        pbData: blob.as_ptr() as *mut u8,
+    };
+    let mut output = DATA_BLOB {
+        cbData: 0,
+        pbData: ptr::null_mut(),
+    };
+    let ok = unsafe {
+        CryptUnprotectData(
+            &mut input,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+    };
+    if ok == 0 {
+        return Err("CryptUnprotectData failed".to_string());
+    }
+    Ok(unsafe { take_data_blob(&mut output) })
+}
+
+#[cfg(windows)]
+unsafe fn take_data_blob(blob: &mut winapi::um::wincrypt::DATA_BLOB) -> Vec<u8> {
+    use winapi::um::winbase::LocalFree;
+    if blob.pbData.is_null() || blob.cbData == 0 {
+        return Vec::new();
+    }
+    let copied = std::slice::from_raw_parts(blob.pbData, blob.cbData as usize).to_vec();
+    LocalFree(blob.pbData as *mut _);
+    blob.pbData = std::ptr::null_mut();
+    blob.cbData = 0;
+    copied
+}
+
+#[cfg(windows)]
+fn restrict_windows_acl(path: &PathBuf) {
+    // SYSTEM (S-1-5-18) and Built-in Administrators (S-1-5-32-544) only.
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    match std::process::Command::new("icacls")
+        .arg(path)
+        .args([
+            "/inheritance:r",
+            "/grant:r",
+            "*S-1-5-18:F",
+            "/grant:r",
+            "*S-1-5-32-544:F",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+    {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => log::warn!(
+            "Could not restrict companion state ACL: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        Err(err) => log::warn!("Could not run icacls for companion state file: {err}"),
+    }
 }
 
 fn client_name() -> String {
