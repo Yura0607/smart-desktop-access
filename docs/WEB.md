@@ -91,7 +91,7 @@ The remaining explanation is iPadOS Safari killing or crashing the WebContent pr
 To lower memory on iPad only (Mac is unchanged):
 
 - Login requests `image-quality: low` so the remote sends smaller frames.
-- Decoded frames are painted at most about 15 FPS (`sdaShouldSkipDraw`); every VP9 packet is still decoded so the stream stays valid.
+- Decoded frames are painted at most about 10 FPS (`sdaShouldSkipDraw`); every VP9 packet is still decoded so the stream stays valid.
 - The branding `MutationObserver` is debounced and disconnects after 15 seconds so it does not walk the whole DOM on every Flutter paint.
 
 Forcing Flutter’s HTML renderer on iPad was tried and not kept: it did not improve the session in WebKit, and Flutter already auto-selects HTML on mobile/iPad (`flt-renderer="html (auto-selected)"`). CanvasKit is left alone on a real Mac.
@@ -117,8 +117,9 @@ Fixes (Mac unchanged: VP9 worker stays on, HTML-renderer is not forced):
 - Companion one-click auto-connect waits until Flutter has registered `onGlobalEvent` *and* `flt-glass-pane` / `flutter-view` exist; it will not call a stub `setByName`. If auto-connect throws, it clears `sda-connect-id` and leaves the list.
 - Auto-resume-after-reload is off (`resume-skip` breadcrumb). Leftover `sda-resume-active` / resume `sda-connect-id` are cleared on load.
 - If Flutter never paints a view (8s, checked again at 14s), a purple fallback offers **Show my computers** instead of a blank page. That button is the only remaining navigation, and only after a tap.
+- On iPad only, live frames are drawn with `drawImage` onto a reused full-window `<canvas id="sda-live-canvas">` (`object-fit: cover`, `pointer-events: none`, clipped below the Flutter toolbar). Flutter’s HTML renderer `decodeImageFromPixels` path (`A.b6h`, a `122 + width*height*4` BMP plus a JS copy every frame) runs only for the first frame and when the frame size changes, so the remote page can lay out and dismiss “waiting for image”. Later frames do not call `onRgba`, which avoids the per-frame BMP allocation that led to `Instance of minified:az` and then a WebKit reload. The overlay does not capture pointer events, so Flutter still handles touch, mouse, zoom, and pan with its existing mapping. A Mac keeps the CanvasKit path and continues to send every painted frame to Flutter.
 
-Breadcrumbs: `GET`/`POST /webclient/sda-log?e=...` (204, logged by nginx). Events include `load`, `connect`, `beat` (every 30s while a frame is flowing), `pagehide`, `pageshow`, `visibility`, `jserror`, `unhandled`, `reconnect`, `resume-skip`, `rgba-err`, `cb-err`, `white-fallback`, and `userclose`. Query fields are `e`, `id`, `ff`, `conn`, `ipad`, `rndr`, `vis`, `pers`, `n`, `why`, `mem` (Chrome only), `t`. No tokens or passwords. `jserror`, `unhandled`, `rgba-err`, and `cb-err` are logged at most once every 10 seconds per message so a noisy Flutter exception cannot flood the log.
+Breadcrumbs: `GET`/`POST /webclient/sda-log?e=...` (204, logged by nginx). Events include `load`, `connect`, `beat` (every 30s while a frame is flowing), `pagehide`, `pageshow`, `visibility`, `jserror`, `unhandled`, `reconnect`, `resume-skip`, `rgba-err`, `cb-err`, `white-fallback`, `overlay`, and `userclose`. Query fields are `e`, `id`, `ff`, `conn`, `ipad`, `rndr`, `vis`, `pers`, `n`, `why`, `mem` (Chrome only), `t`. No tokens or passwords. `jserror`, `unhandled`, `rgba-err`, and `cb-err` are logged at most once every 10 seconds per message so a noisy Flutter exception cannot flood the log.
 
 If an iPad still shows a white screen after this update, close every `smartdesktopaccess.duckdns.org` tab, then Settings → Safari → Advanced → Website Data → remove `smartdesktopaccess.duckdns.org`, and open `/webclient/` in a new tab.
 
