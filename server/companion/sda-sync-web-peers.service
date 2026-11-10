@@ -1,0 +1,8 @@
+[Unit]
+Description=Sync companion devices into the rustdesk-api web address book
+After=network.target rustdesk-api.service sda-companion.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/sda-companion/sync_web_peers.py
+Nice=10

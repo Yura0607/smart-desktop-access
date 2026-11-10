@@ -11,9 +11,11 @@ Use the rustdesk-api web client (full control, not the companion placeholder):
 - Companion device list: `https://smartdesktopaccess.duckdns.org/companion/`
 - Companion view page: `https://smartdesktopaccess.duckdns.org/companion/view` (still a placeholder; do not use this for control)
 
-Sign in as the same account used on the admin site (`yuriy`). In the web client, type the computer ID and the computer's permanent password (the one the client registered with the companion). The page shows the remote screen and sends mouse and keyboard input. Incoming-only SDA clients use `approve-mode: password-click`: the permanent password is enough, or someone at the computer can click Accept.
+Sign in as the same account used on the admin site (`yuriy`). After login, `/webclient/` lists every computer that has the SDA client installed (the companion's registered devices). Each card shows the ID, the owner's Rename alias (or the hostname if none is set), and Online/Offline. Click a card to put its ID in the Remote ID field; on a phone, tap the card to connect, and on a desktop double-click the card or click the arrow. You should not have to type IDs or the device password.
 
-The stock page still shows RustDesk (Beta) branding. No client or admin app rebuild is required for this path.
+The device's permanent password is copied into rustdesk-api's address book and applied automatically when the session starts (the web client hashes it with the live salt and challenge). Incoming-only SDA clients use `approve-mode: password-click`: that saved password is enough, or someone at the computer can click Accept.
+
+The stock page may still show third-party branding until the web-client look is updated. No native admin app or incoming-client rebuild is required for this path.
 
 ## WebSocket routing (wss through 443)
 
@@ -39,6 +41,23 @@ The bundled `/webclient/` then connects to `/ws/id` and `/ws/relay` instead of d
 TCP 21118 and 21119 are also allowed in the VM iptables (`/etc/iptables/rules.v4`) as a fallback. Direct access from the public internet still times out unless the Oracle Cloud security list allows those ports. The 443 proxy does not need a new cloud firewall hole.
 
 Login protection is unchanged: `captcha-threshold: -1`, the fail2ban `sda-login` jail, and the nginx `limit_req` zone on `/api/login` and `/api/admin/login`.
+
+
+## Device list and saved passwords
+
+Companion-registered devices are copied into rustdesk-api's address book for user `yuriy` so `/webclient/` and `/_admin/` can show them.
+
+- Script: `/opt/sda-companion/sync_web_peers.py`
+- Timer: `sda-sync-web-peers.timer` (`OnBootSec=30s`, `OnUnitActiveSec=2min`, `AccuracySec=15s`)
+- Oneshot service: `sda-sync-web-peers.service` runs `/usr/bin/python3 /opt/sda-companion/sync_web_peers.py`
+
+Each run reads the companion device list in place (the companion token from `/etc/sda-companion.env` or `/var/lib/sda-companion/admin-token`; the script never prints tokens or passwords), then upserts rows in `/opt/rustdesk-api/data/rustdeskapi.db` for `user_id` of `yuriy` and `collection_id` 0 (the personal book used by `/api/server-config`). It does not write into other collections. The display name is the companion alias if set, otherwise the hostname. Online status is stored as the hostname field `Online` / `Offline` because rustdesk-api's web-client payload does not copy alias or a live online flag; the cards therefore read like `Yuriy's Dell Laptop@Online`. The address-book `hash` column is base64 of the device's permanent password.
+
+Removed or deactivated companion devices are deleted from that managed set (rows tagged `["sda-companion"]`). New installs and renames show up within about two minutes.
+
+`/api/server-config` then returns those peers to the bundled web client. A small patch in rustdesk-api's web JS (`resources/web/js/src/ljw.js`, `connection.ts`, and `resources/web/js/dist/index.js`) stores the decoded hash as `plainpwd` and, when the remote sends its salt, calls `login(plainpwd)` so the password is hashed with the live salt and challenge. Putting the raw password bytes in the remembered `password` field skips the salt step and the remote answers "Wrong Password".
+
+The old `/webclient2/` path (removed upstream) is served from `/var/www/sda-webclient2/index.html` so `/_admin/` "Web Client" links of the form `/webclient2/#/<id>` redirect to `/webclient/#/?id=<id>`.
 
 ## Companion pages
 
