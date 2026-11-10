@@ -130,6 +130,7 @@ pub fn apply() {
     builtin.insert("download-page-url".to_owned(), DOWNLOAD_PAGE_URL.to_owned());
     builtin.insert("source-url".to_owned(), SOURCE_URL.to_owned());
     builtin.insert("display-name".to_owned(), display_name().to_owned());
+    builtin.insert("legal-copyright".to_owned(), LEGAL_COPYRIGHT.to_owned());
 }
 
 #[cfg(test)]

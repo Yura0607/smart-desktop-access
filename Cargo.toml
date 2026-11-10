@@ -256,8 +256,8 @@ webrtc-util = { git = "https://github.com/rustdesk-org/webrtc", rev = "49c89bd8d
 webrtc-sctp = { git = "https://github.com/rustdesk-org/webrtc", rev = "49c89bd8d30e6e62e4c1a96cee38fdc11f79ef63" }
 
 [package.metadata.winres]
-CompanyName = "Smart Desktop Access"
-LegalCopyright = "Copyright © 2026 Smart Desktop Access. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0"
+CompanyName = "Yuriy"
+LegalCopyright = "Copyright © 2026 Yuriy. Based on RustDesk, © Purslane Tech Pte. Ltd., AGPL-3.0"
 ProductName = "Smart Desktop Access"
 FileDescription = "Smart Desktop Access"
 OriginalFilename = "SmartDesktopAccess.exe"
