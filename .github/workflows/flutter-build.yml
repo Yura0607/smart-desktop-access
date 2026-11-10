@@ -25,7 +25,11 @@ on:
         type: boolean
         default: false
       windows-only:
-        description: "Build only the Windows x64 installers"
+        description: "Build only the Windows installers (x64 Flutter, plus the x86 Sciter client when variant is client)"
+        type: boolean
+        default: false
+      windows-x86-only:
+        description: "Build only the 32-bit Windows Sciter client"
         type: boolean
         default: false
       publish-release:
@@ -149,11 +153,12 @@ jobs:
 
   generate-bridge:
     needs: [validate-update-metadata-keys]
+    if: ${{ !inputs.windows-x86-only }}
     uses: ./.github/workflows/bridge.yml
 
   build-RustDeskTempTopMostWindow:
     needs: [validate-update-metadata-keys]
-    if: ${{ !inputs.macos-only }}
+    if: ${{ !inputs.macos-only && !inputs.windows-x86-only }}
     uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
     strategy:
       fail-fast: false
@@ -170,7 +175,7 @@ jobs:
   build-for-windows-flutter:
     name: ${{ matrix.job.target }}
     needs: [build-RustDeskTempTopMostWindow, generate-bridge]
-    if: ${{ !inputs.macos-only }}
+    if: ${{ !inputs.macos-only && !inputs.windows-x86-only }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
@@ -603,7 +608,9 @@ jobs:
   build-for-windows-sciter:
     name: ${{ matrix.job.target }} (${{ matrix.job.os }})
     needs: [validate-update-metadata-keys]
-    if: ${{ !inputs.product-build && !inputs.macos-only && !inputs.windows-only }}
+    # Flutter cannot target 32-bit Windows, so the incoming-only client uses the
+    # legacy Sciter UI here. Skip the manager (admin) variant.
+    if: ${{ !inputs.macos-only && inputs.variant != 'admin' && (inputs.windows-x86-only || inputs.product-build || (!inputs.product-build && !inputs.windows-only)) }}
     runs-on: ${{ matrix.job.os }}
     # Temporarily disable this action due to additional test is needed.
     # if: false
@@ -685,6 +692,11 @@ jobs:
           head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
         shell: bash
 
+      - name: Apply product variant
+        if: ${{ inputs.product-build }}
+        shell: bash
+        run: python3 res/sda/apply_variant.py
+
       - name: Build rustdesk
         id: build
         shell: bash
@@ -695,7 +707,13 @@ jobs:
           cargo update -p sciter-rs --precise 674e07d3066ca9a92ced3816203ab6b652629d1e
           cargo build --locked --features inline,vram,hwcodec --release --bins
           mkdir -p ./Release
-          mv ./target/release/rustdesk.exe ./Release/rustdesk.exe
+          if [ "${{ inputs.product-build }}" = "true" ]; then
+            exe_name="${SDA_EXE_NAME}.exe"
+          else
+            exe_name="rustdesk.exe"
+          fi
+          mv ./target/release/rustdesk.exe "./Release/${exe_name}"
+          echo "exe_name=${exe_name}" >> $GITHUB_OUTPUT
           curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
           echo "output_folder=./Release" >> $GITHUB_OUTPUT
           curl -LJ -o ./usbmmidd_v2.zip https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip
@@ -740,7 +758,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA == 'true'
         shell: powershell
         run: |
-          $reportedVersion = (& ".\Release\rustdesk.exe" --version | Out-String).Trim()
+          $exeName = "${{ steps.build.outputs.exe_name }}"
+          $reportedVersion = (& ".\Release\$exeName" --version | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) {
             throw "rustdesk --version exited with $LASTEXITCODE"
           }
@@ -766,7 +785,7 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../Release/ -e rustdesk.exe -l 11 -t "${{ matrix.job.target }}"
+          python3 ./generate.py -f ../../Release/ -e "${{ steps.build.outputs.exe_name }}" -l 11 -t "${{ matrix.job.target }}"
           popd
           mkdir -p ./packer-template
           cp ./target/${{ matrix.job.target }}/release/rustdesk-portable-packer.exe ./packer-template/rustdesk-template-${{ matrix.job.arch }}.exe
@@ -780,15 +799,22 @@ jobs:
           if-no-files-found: error
 
       - name: Build self-extracted executable
+        id: pack
         shell: bash
         run: |
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/rustdesk.exe
+          python3 ./generate.py -f ../../Release/ -o . -e "../../Release/${{ steps.build.outputs.exe_name }}"
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.exe
+          if [ "${{ inputs.product-build }}" = "true" ]; then
+            out_name="${SDA_EXE_NAME}-windows-x86.exe"
+          else
+            out_name="rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.exe"
+          fi
+          mv ./target/release/rustdesk-portable-packer.exe "./SignOutput/${out_name}"
+          echo "installer_name=${out_name}" >> $GITHUB_OUTPUT
 
       - name: Sign rustdesk self-extracted file
         if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
@@ -804,14 +830,23 @@ jobs:
           path: ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.exe
           if-no-files-found: error
 
+      - name: Upload product Windows x86 installer
+        if: env.UPLOAD_ARTIFACT == 'true' && inputs.product-build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.SDA_EXE_NAME }}-windows-x86
+          path: ./SignOutput/${{ env.SDA_EXE_NAME }}-windows-x86.exe
+          if-no-files-found: error
+
       - name: Publish Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
-        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true'
+        if: env.UPLOAD_ARTIFACT == 'true' && env.PUBLISH_UPDATE_METADATA != 'true' && inputs.publish-release
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
             ./SignOutput/rustdesk-*.exe
+            ./SignOutput/${{ env.SDA_EXE_NAME }}-windows-x86.exe
 
   build-rustdesk-ios:
     if: ${{ !inputs.macos-only && !inputs.windows-only && inputs.upload-artifact && (!inputs.product-build || inputs.variant == 'admin') }}

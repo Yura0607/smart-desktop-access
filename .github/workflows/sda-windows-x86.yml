@@ -1,0 +1,26 @@
+name: Smart Desktop Access Windows x86
+
+on:
+  workflow_dispatch:
+
+# 32-bit customer installer only. Flutter cannot target Win32, so this job
+# builds the incoming-only client with the legacy Sciter UI.
+# Installers are workflow artifacts. This does not publish a GitHub Release.
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  client-x86:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: windows-preview
+      publish-update-metadata: false
+      variant: client
+      product-build: true
+      windows-only: true
+      windows-x86-only: true
+      publish-release: false
