@@ -9,6 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import admin_2fa
 import companion
 import email_text
 
@@ -20,6 +21,10 @@ class CompanionTest(unittest.TestCase):
         key_path = Path(self.tmp.name) / "secret.key"
         key_path.write_bytes(os.urandom(32))
         os.environ["SDA_SECRET_KEY_FILE"] = str(key_path)
+        self.totp_secret = admin_2fa.generate_secret()
+        totp_path = Path(self.tmp.name) / "admin-totp.secret"
+        totp_path.write_text(self.totp_secret + "\n", encoding="utf-8")
+        os.environ["SDA_ADMIN_TOTP_SECRET_FILE"] = str(totp_path)
         self.server = companion.serve("127.0.0.1", 0, Path(self.tmp.name))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -713,6 +718,67 @@ class CompanionTest(unittest.TestCase):
             self.assertEqual(body["error"], "too many requests")
         finally:
             companion.ADMIN_LIMIT = old
+
+    def request_raw(self, method, path, payload=None, cookie=None):
+        data = None if payload is None else json.dumps(payload).encode()
+        headers = {}
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+        if cookie:
+            headers["Cookie"] = cookie
+        req = urllib.request.Request(self.base + path, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req) as response:
+                return response.status, response.headers, response.read()
+        except urllib.error.HTTPError as err:
+            return err.code, err.headers, err.read()
+
+    def test_admin_2fa_check_and_verify(self):
+        status, headers, body = self.request_raw("GET", "/api/v1/admin-2fa/check")
+        self.assertEqual(status, 401)
+        self.assertIn(b"unauthorized", body)
+
+        status, headers, body = self.request_raw("GET", "/api/v1/admin-2fa")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers.get("Content-Type", ""))
+        self.assertIn(b"Admin verification", body)
+        self.assertIn(b"#6d28d9", body)
+        self.assertIn(b"#2563eb", body)
+
+        status, headers, body = self.request_raw(
+            "POST",
+            "/api/v1/admin-2fa/verify",
+            {"code": "000000"},
+        )
+        self.assertEqual(status, 401)
+
+        code = admin_2fa.totp_code(self.totp_secret)
+        status, headers, body = self.request_raw(
+            "POST",
+            "/api/v1/admin-2fa/verify",
+            {"code": code},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body.decode())["ok"], True)
+        set_cookie = headers.get("Set-Cookie") or ""
+        self.assertIn(admin_2fa.COOKIE_NAME + "=", set_cookie)
+        self.assertIn("HttpOnly", set_cookie)
+        self.assertIn("Secure", set_cookie)
+        self.assertIn("SameSite=Strict", set_cookie)
+        self.assertIn("Max-Age=43200", set_cookie)
+        cookie = set_cookie.split(";", 1)[0]
+        self.assertTrue(cookie.startswith(admin_2fa.COOKIE_NAME + "="))
+
+        status, headers, body = self.request_raw("GET", "/api/v1/admin-2fa/check", cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body.decode())["ok"], True)
+
+        status, headers, body = self.request_raw(
+            "GET",
+            "/api/v1/admin-2fa/check",
+            cookie=admin_2fa.COOKIE_NAME + "=v1.9999999999." + ("0" * 64),
+        )
+        self.assertEqual(status, 401)
 
 
 if __name__ == "__main__":

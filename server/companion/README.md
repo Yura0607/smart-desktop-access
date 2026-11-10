@@ -36,7 +36,7 @@ sudo openssl rand -out /etc/sda/secret.key 32
 sudo chown root:sda /etc/sda /etc/sda/secret.key
 sudo chmod 750 /etc/sda
 sudo chmod 640 /etc/sda/secret.key
-sudo cp companion.py email_text.py notes.py /opt/sda-companion/
+sudo cp companion.py email_text.py notes.py admin_2fa.py /opt/sda-companion/
 sudo cp -a web /opt/sda-companion/web
 sudo cp sda-companion.env.example /etc/sda-companion.env
 sudo chown -R sda:sda /opt/sda-companion /var/lib/sda-companion
@@ -104,6 +104,24 @@ hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old 
 
 ## Backups
 
-Back up all of `/var/lib/sda-companion` and `/etc/sda/secret.key`. The data directory holds `devices.json`, `notes.json`, `notes.key`, and `admin-token`. `devices.json` stores each device `password` and `device_token` as AES-256-GCM (`enc:v1:<nonce>:<ciphertext>`). The key lives at `/etc/sda/secret.key` (root:sda, mode 640) and is never kept in the repo or the data directory. Restoring `devices.json` without that key makes the stored access codes unreadable. `notes.json` has the work log in plain text and credentials only as ciphertext. Restoring `notes.json` without `notes.key` makes the stored note passwords unreadable. Do not commit the key files.
+Back up all of `/var/lib/sda-companion`, `/etc/sda/secret.key`, and `/etc/sda/admin-totp.secret` if that file exists. The data directory holds `devices.json`, `notes.json`, `notes.key`, and `admin-token`. `devices.json` stores each device `password` and `device_token` as AES-256-GCM (`enc:v1:<nonce>:<ciphertext>`). The key lives at `/etc/sda/secret.key` (root:sda, mode 640) and is never kept in the repo or the data directory. Restoring `devices.json` without that key makes the stored access codes unreadable. `notes.json` has the work log in plain text and credentials only as ciphertext. Restoring `notes.json` without `notes.key` makes the stored note passwords unreadable. Do not commit the key files.
 
 Registration is open on purpose: the client program cannot keep a secret. After the first registration the device token blocks overwrites. Do not put the admin token in the client build.
+
+## Admin console 2FA (prepared, not enabled)
+
+A TOTP check is built into the companion for the rustdesk-api console at `/_admin/` only. It does not wrap `/api/`, `/webclient/`, `/ws/`, `/companion/`, or anything the native apps and browser client use.
+
+- `GET /api/v1/admin-2fa` — purple/blue code page
+- `POST /api/v1/admin-2fa/verify` — accepts `{"code":"123456"}` and sets a signed HttpOnly Secure SameSite=Strict cookie named `sda_admin_2fa` for 12 hours
+- `GET /api/v1/admin-2fa/check` — `200` with a valid cookie, `401` without; this is the nginx `auth_request` target
+
+The TOTP secret is `/etc/sda/admin-totp.secret` (`root:sda`, mode `640`). Override the path with `SDA_ADMIN_TOTP_SECRET_FILE`. The cookie is signed with `/etc/sda/secret.key`. Neither file belongs in the repo.
+
+The nginx snippet is `nginx/sda-admin-2fa.conf.disabled` (copied on the server to `/etc/nginx/snippets/sda-admin-2fa.conf.disabled`). Leave it disabled until the owner has scanned the enrollment QR. To enable later:
+
+```sh
+sudo cp /etc/nginx/snippets/sda-admin-2fa.conf.disabled /etc/nginx/snippets/sda-admin-2fa.conf
+sudo sed -i 's|# include /etc/nginx/snippets/sda-admin-2fa.conf;|include /etc/nginx/snippets/sda-admin-2fa.conf;|' /etc/nginx/sites-enabled/sda
+sudo nginx -t && sudo systemctl reload nginx
+```

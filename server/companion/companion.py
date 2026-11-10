@@ -27,6 +27,7 @@ from urllib.request import Request, urlopen
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+import admin_2fa
 import email_text
 import notes as client_notes
 
@@ -34,6 +35,7 @@ ONLINE_SECONDS = 180
 ID_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.")
 REGISTER_LIMIT = 30
 ADMIN_LIMIT = 120
+TOTP_LIMIT = 10
 RATE_WINDOW_SECONDS = 60.0
 MAX_EMAIL_LEN = 254
 MAX_HOSTNAME_LEN = 128
@@ -484,13 +486,13 @@ def _download_target(path: str) -> str:
     return email_text.direct_url(parts[2])
 
 
-def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimiter, client_notes_store: client_notes.Notes):
+def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimiter, client_notes_store: client_notes.Notes, totp: admin_2fa.TotpGate | None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: Any) -> None:
             # Do not log request bodies; they contain passwords.
             return
 
-        def _send(self, status: int, payload: dict[str, Any] | None = None, body: bytes | None = None, content_type: str = "application/json") -> None:
+        def _send(self, status: int, payload: dict[str, Any] | None = None, body: bytes | None = None, content_type: str = "application/json", extra_headers: list[tuple[str, str]] | None = None) -> None:
             data = body if body is not None else json.dumps(payload or {}).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", content_type)
@@ -498,6 +500,8 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+            for key, value in extra_headers or []:
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(data)
 
@@ -563,7 +567,12 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             return self.client_address[0]
 
         def _too_fast(self, bucket: str) -> bool:
-            limit = REGISTER_LIMIT if bucket == "register" else ADMIN_LIMIT
+            if bucket == "register":
+                limit = REGISTER_LIMIT
+            elif bucket == "totp":
+                limit = TOTP_LIMIT
+            else:
+                limit = ADMIN_LIMIT
             if limiter.allow(f"{bucket}:{self._client_ip()}", limit):
                 return False
             self._send(429, {"error": "too many requests"})
@@ -612,6 +621,15 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             if path == "/api/v1/health":
                 self._send(200, {"ok": True, "smtp": smtp.configured})
                 return
+            if path == "/api/v1/admin-2fa":
+                self._send(200, body=admin_2fa.page_bytes(), content_type="text/html; charset=utf-8")
+                return
+            if path == "/api/v1/admin-2fa/check":
+                if totp is not None and totp.cookie_valid(self.headers.get("Cookie")):
+                    self._send(200, {"ok": True})
+                else:
+                    self._send(401, {"error": "unauthorized"})
+                return
             if path == "/api/v1/devices":
                 if self._too_fast("admin"):
                     return
@@ -649,6 +667,9 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
 
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path
+            if path == "/api/v1/admin-2fa/verify":
+                self._admin_2fa_verify()
+                return
             try:
                 payload = self._json()
             except (ValueError, json.JSONDecodeError):
@@ -992,6 +1013,33 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 return
             self._send(200, {"ok": True})
 
+        def _admin_2fa_verify(self) -> None:
+            if self._too_fast("totp"):
+                return
+            if totp is None:
+                self._send(503, {"error": "not configured"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+                if length <= 0:
+                    raise ValueError("empty body")
+                if length > 4096:
+                    raise ValueError("body too large")
+                raw = self.rfile.read(length)
+                code = admin_2fa.extract_code(raw, self.headers.get("Content-Type") or "")
+            except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+                self._send(400, {"error": "bad request"})
+                return
+            if not totp.verify(code):
+                self._send(401, {"error": "invalid code"})
+                return
+            cookie = totp.issue_cookie()
+            self._send(
+                200,
+                {"ok": True},
+                extra_headers=[("Set-Cookie", totp.set_cookie_header(cookie))],
+            )
+
     return Handler
 
 
@@ -1022,9 +1070,10 @@ def serve(host: str, port: int, data_dir: Path) -> ThreadingHTTPServer:
     smtp = Smtp()
     limiter = RateLimiter()
     client_notes_store = client_notes.Notes(data_dir)
+    totp = admin_2fa.TotpGate.from_env()
     server = ThreadingHTTPServer(
         (host, port),
-        make_handler(store, smtp, token, limiter, client_notes_store),
+        make_handler(store, smtp, token, limiter, client_notes_store, totp),
     )
     return server
 
