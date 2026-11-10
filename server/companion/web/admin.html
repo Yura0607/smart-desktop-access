@@ -2,33 +2,127 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Smart Desktop Access Admin</title>
   <link rel="icon" href="favicon.ico">
   <style>
-    body { font-family: sans-serif; margin: 24px; color: #102033; background: #f4f8fc; }
-    h1 { font-size: 1.4rem; }
-    .card { background: #fff; border-radius: 12px; padding: 16px; margin: 12px 0; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
-    button { margin-right: 8px; }
-    .online { color: #0b8f4d; font-weight: 700; }
-    .offline { color: #667; }
-    .new { background: #0b63e5; color: #fff; border-radius: 8px; padding: 2px 8px; font-size: .8rem; }
-    input { padding: 8px; width: min(420px, 100%); }
+    :root {
+      --blue: #2563eb;
+      --blue-deep: #1d4ed8;
+      --purple: #6d28d9;
+      --purple-deep: #4c1d95;
+      --ink: #0f172a;
+      --muted: #475569;
+      --card: #ffffff;
+      --online: #047857;
+      --offline: #64748b;
+      --danger: #b45309;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(165deg, #312e81 0%, #1e3a8a 48%, #2563eb 100%);
+      min-height: 100vh;
+      padding: max(16px, env(safe-area-inset-top)) 16px 32px;
+    }
+    .wrap { width: min(760px, 100%); margin: 0 auto; }
+    h1 {
+      margin: 8px 0 6px;
+      font-size: clamp(1.35rem, 4vw, 1.8rem);
+      color: #fff;
+    }
+    .lead { color: #e0e7ff; margin: 0 0 16px; line-height: 1.45; }
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 16px;
+      margin: 12px 0;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, .18);
+    }
+    .device {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .device-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .name { font-size: 1.15rem; font-weight: 700; }
+    .host { font-size: .9rem; color: var(--muted); margin-top: 2px; }
+    .meta { font-size: .95rem; color: var(--muted); word-break: break-word; }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: .8rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .online { background: #d1fae5; color: var(--online); }
+    .offline { background: #e2e8f0; color: var(--offline); }
+    .deactivated { background: #ffedd5; color: var(--danger); }
+    .new { background: #ede9fe; color: var(--purple); }
+    label { display: block; font-weight: 600; }
+    input {
+      margin-top: 6px;
+      padding: 12px;
+      width: 100%;
+      font-size: 16px;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+    }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button, a.btn {
+      appearance: none;
+      border: 0;
+      border-radius: 12px;
+      min-height: 44px;
+      padding: 10px 14px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+    button { background: #e2e8f0; color: var(--ink); }
+    button.primary, a.btn.connect {
+      background: linear-gradient(90deg, var(--purple), var(--blue));
+      color: #fff;
+      flex: 1 1 180px;
+    }
+    button:disabled, a.btn[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+    #error { color: #b91c1c; min-height: 1.2em; margin: 8px 0 0; }
+    @media (max-width: 560px) {
+      .device-top { flex-direction: column; }
+      .actions button, .actions a.btn { width: 100%; flex: 1 1 100%; }
+    }
   </style>
 </head>
 <body>
-  <h1>Smart Desktop Access Admin</h1>
-  <p>Computers that have installed the client. Full control stays in the admin app. This page lists them and sends the install email.</p>
-  <div class="card">
-    <label>Companion token<br>
-      <input id="token" type="password" autocomplete="current-password">
-    </label>
-    <button id="save" type="button">Save and refresh</button>
-    <p id="error"></p>
+  <div class="wrap">
+    <h1>Smart Desktop Access</h1>
+    <p class="lead">Every computer with the client. Tap <strong>Connect in browser</strong> for full control. The password is filled in automatically and is never put in the address.</p>
+    <div class="card">
+      <label>Companion token
+        <input id="token" type="password" autocomplete="current-password">
+      </label>
+      <div class="actions" style="margin-top:12px">
+        <button id="save" class="primary" type="button">Save and refresh</button>
+      </div>
+      <p id="error"></p>
+    </div>
+    <div id="banner"></div>
+    <div id="summary" class="lead"></div>
+    <div id="list"></div>
   </div>
-  <div id="banner"></div>
-  <div id="list"></div>
   <script>
+    const deviceById = {};
+    const tokenInput = document.getElementById('token');
+    const seenKey = 'sda-known-ids';
+
     function companionApi(path) {
       let dir = location.pathname.replace(/\/(admin|view)\/?$/, '');
       if (!dir.endsWith('/')) dir += '/';
@@ -39,12 +133,55 @@
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
       }[ch]));
     }
-    const tokenInput = document.getElementById('token');
-    tokenInput.value = sessionStorage.getItem('sda-token') || '';
-    const seenKey = 'sda-known-ids';
-
     function known() {
       return new Set((localStorage.getItem(seenKey) || '').split(',').filter(Boolean));
+    }
+    function rememberPeerPassword(id, password) {
+      if (!id) return;
+      let peers = {};
+      try { peers = JSON.parse(localStorage.getItem('peers') || '{}') || {}; }
+      catch (err) { peers = {}; }
+      const prev = (peers[id] && typeof peers[id] === 'object') ? peers[id] : {};
+      const next = Object.assign({}, prev);
+      if (password) {
+        next.plainpwd = password;
+        next.remember = true;
+        delete next.password;
+      }
+      peers[id] = next;
+      localStorage.setItem('peers', JSON.stringify(peers));
+      localStorage.setItem('remote-id', id);
+      try {
+        sessionStorage.setItem('sda-connect-id', id);
+        if (password) sessionStorage.setItem('sda-connect-plainpwd', password);
+      } catch (err) {}
+    }
+    function webClientUrl(id) {
+      return '/webclient/#/?id=' + encodeURIComponent(id);
+    }
+    function connectInBrowser(id) {
+      const device = deviceById[id];
+      if (!device) return;
+      const password = String(device.password || '');
+      rememberPeerPassword(String(device.id), password);
+      const url = webClientUrl(String(device.id));
+      const win = window.open(url, '_blank');
+      if (!win) {
+        location.href = url;
+        return;
+      }
+      const payload = {
+        source: 'sda-companion',
+        type: 'sda-connect',
+        id: String(device.id),
+        password: password
+      };
+      const send = () => {
+        try { win.postMessage(payload, location.origin); } catch (err) {}
+      };
+      send();
+      setTimeout(send, 400);
+      setTimeout(send, 1500);
     }
 
     async function load() {
@@ -56,7 +193,9 @@
         error.textContent = 'Paste the token printed when the companion service starts.';
         return;
       }
-      const response = await fetch(companionApi('/api/v1/devices'), { headers: { Authorization: 'Bearer ' + token } });
+      const response = await fetch(companionApi('/api/v1/devices'), {
+        headers: { Authorization: 'Bearer ' + token }
+      });
       if (response.status === 401) {
         error.textContent = 'That token was not accepted.';
         return;
@@ -67,10 +206,12 @@
       }
       const body = await response.json();
       const devices = body.devices || [];
+      Object.keys(deviceById).forEach((key) => { delete deviceById[key]; });
+      devices.forEach((device) => { deviceById[device.id] = device; });
       const fresh = devices.filter((device) => !known().has(device.id));
       const banner = document.getElementById('banner');
       banner.innerHTML = fresh.length
-        ? '<div class="card">New computer: ' + fresh.map((device) => esc(device.hostname || device.id)).join(', ') +
+        ? '<div class="card">New computer: ' + fresh.map((device) => esc(device.alias || device.hostname || device.id)).join(', ') +
           ' <button id="gotit" type="button">Got it</button></div>'
         : '';
       const gotit = document.getElementById('gotit');
@@ -80,20 +221,35 @@
           load();
         };
       }
+      const onlineCount = devices.filter((device) => device.online).length;
+      document.getElementById('summary').textContent = devices.length
+        ? (devices.length + ' computer' + (devices.length === 1 ? '' : 's') + ', ' + onlineCount + ' online')
+        : '';
       document.getElementById('list').innerHTML = devices.map((device) => {
         const alias = String(device.alias || '').trim();
         const host = String(device.hostname || '').trim();
         const name = esc(alias || host || device.id);
-        const under = alias && host
-          ? '<div style="font-size:.85rem">' + esc(host) + '</div>'
-          : '';
-        const state = device.online ? '<span class="online">Online</span>' : '<span class="offline">Offline</span>';
-        const badge = known().has(device.id) ? '' : ' <span class="new">New</span>';
-        return '<div class="card"><strong>' + name + '</strong>' + badge + under +
-          '<div>' + esc(device.email || 'No email yet') + ' · ID ' + esc(device.id) + ' · ' + state + '</div>' +
-          '<p><button data-email="' + device.id + '" type="button">Send email</button>' +
-          '<button data-rename="' + device.id + '" data-alias="' + esc(alias) + '" type="button">Rename</button></p></div>';
+        const under = alias && host ? '<div class="host">' + esc(host) + '</div>' : '';
+        const state = device.deactivated
+          ? '<span class="pill deactivated">Deactivated</span>'
+          : (device.online ? '<span class="pill online">Online</span>' : '<span class="pill offline">Offline</span>');
+        const badge = known().has(device.id) ? '' : ' <span class="pill new">New</span>';
+        const connect = device.deactivated
+          ? ''
+          : '<a class="btn connect" data-connect="' + esc(device.id) + '" href="' + webClientUrl(device.id) + '">Connect in browser</a>';
+        return '<div class="card device" data-id="' + esc(device.id) + '">' +
+          '<div class="device-top"><div><div class="name">' + name + '</div>' + under + badge + '</div>' + state + '</div>' +
+          '<div class="meta">ID ' + esc(device.id) + (device.email ? ' · ' + esc(device.email) : '') + '</div>' +
+          '<div class="actions">' + connect +
+          '<button data-email="' + esc(device.id) + '" type="button">Send email</button>' +
+          '<button data-rename="' + esc(device.id) + '" data-alias="' + esc(alias) + '" type="button">Rename</button></div></div>';
       }).join('') || '<div class="card">No computers yet.</div>';
+      document.querySelectorAll('[data-connect]').forEach((button) => {
+        button.onclick = (event) => {
+          event.preventDefault();
+          connectInBrowser(button.getAttribute('data-connect'));
+        };
+      });
       document.querySelectorAll('[data-email]').forEach((button) => {
         button.onclick = () => sendEmail(button.getAttribute('data-email'));
       });
@@ -137,6 +293,7 @@
       alert(body.error || 'Could not send email.');
     }
 
+    tokenInput.value = sessionStorage.getItem('sda-token') || '';
     document.getElementById('save').onclick = load;
     if (tokenInput.value) load();
     setInterval(() => { if (tokenInput.value.trim()) load(); }, 15000);

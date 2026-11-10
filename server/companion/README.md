@@ -60,7 +60,7 @@ If SMTP is not set, or the provider refuses the message, Send email falls back t
 ## What the admin sees
 
 - Native admin app: the Computers list, after the token is saved on that computer.
-- Browser: `https://smartdesktopaccess.duckdns.org/companion/` (same token). Connect is not in the browser page yet; the web client will give full control from the browser (see `docs/WEB.md`).
+- Browser: `https://smartdesktopaccess.duckdns.org/companion/` (same token). The page lists every registered computer with its name, ID, and Online/Offline status. **Connect in browser** opens `/webclient/#/?id=<id>` and stores that computer's permanent password in same-origin `localStorage` (`peers.<id>.plainpwd`) and `sessionStorage` so the web client can sign in without a prompt. The password is never placed in a query string.
 - Web client page: `https://smartdesktopaccess.duckdns.org/companion/view` (placeholder; must become full remote control from the browser; see `docs/WEB.md`).
 
 ## Caddy
