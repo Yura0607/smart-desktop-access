@@ -77,6 +77,29 @@ On iPad only, VP9 decoding runs on the main thread (`worker: false`) and skips t
 
 If an iPad still shows a black screen after an update, close every `smartdesktopaccess.duckdns.org` tab, then on the iPad go to Settings → Safari → Advanced → Website Data, search for `smartdesktopaccess.duckdns.org`, and remove it. Reopen `/webclient/` (a new tab, not a frozen one). Clearing all Safari history is not required.
 
+## Mid-session reloads (iPad “the connection drops”)
+
+When the relay closes at the same second as a fresh `GET /webclient/` (only `index.html`, not `main.dart.js`), the tab itself reloaded. A search of the live client found no `location.reload` / `location.href =` during a session:
+
+- `getServerConf` no longer reloads the page (that older bug tore down “Connected, waiting for image”).
+- Safari’s service-worker unregister does not reload.
+- Flutter’s `main.dart.js` only *reads* `location` for routing; it does not reload.
+- The rename overlay called `location.reload()` after Save. That button is hidden during a session, and Save now skips the reload if `window.curConn` is set.
+
+The remaining explanation is iPadOS Safari killing or crashing the WebContent process (memory / jetsam) while main-thread VP9 wasm and Flutter are both running, then auto-reloading the tab. Rapid `/webclient/` hits a few seconds apart match that pattern.
+
+To lower memory on iPad only (Mac is unchanged):
+
+- Login requests `image-quality: low` so the remote sends smaller frames.
+- Decoded frames are painted at most about 15 FPS (`sdaShouldSkipDraw`); every VP9 packet is still decoded so the stream stays valid.
+- The branding `MutationObserver` is debounced and disconnects after 15 seconds so it does not walk the whole DOM on every Flutter paint.
+
+Forcing Flutter’s HTML renderer on iPad was tried and not kept: it did not improve the session in WebKit, and Flutter already auto-selects HTML on mobile/iPad (`flt-renderer="html (auto-selected)"`). CanvasKit is left alone on a real Mac.
+
+If the relay drops while the page is still up, the client silently reconnects to the same ID up to 3 times (not after the user taps close, and not before the first frame / peer info). If Safari reloads the tab mid-session, `sessionStorage` remembers the ID and auto-resumes up to 3 times, then stops so a crash cannot loop forever. After a minute of stable video the resume counter resets.
+
+Breadcrumbs: `GET`/`POST /webclient/sda-log?e=...` (204, logged by nginx). Events include `load`, `connect`, `beat` (every 30s while a frame is flowing), `pagehide`, `pageshow`, `visibility`, `jserror`, `unhandled`, `reconnect`, `resume`, and `userclose`. Query fields are `e`, `id`, `ff`, `conn`, `ipad`, `rndr`, `vis`, `pers`, `n`, `why`, `mem` (Chrome only), `t`. No tokens or passwords. `jserror` and `unhandled` are logged at most once every 10 seconds per message so a noisy Flutter exception cannot flood the log.
+
 ## Connecting dialog and keyboard focus
 
 The bundled Flutter build treats almost every JS `msgbox` as a dialog with Cancel and OK, and OK navigates home (`closeConnection`). Status dialogs such as "Connecting... / Logging in..." and "Successful / Connected, waiting for image..." are therefore not forwarded from JS. An empty first-frame `msgbox` is treated as a dismiss plus keyboard-focus hook. Flutter's own "waiting for image" loader still closes itself when the first RGBA frame arrives, so the overlay disappears without tapping OK. If that dialog is somehow still visible, Cancel only dismisses it; OK must not be required, and the session stays up after the first frame.
@@ -93,7 +116,7 @@ In the web client:
 2. On the computer list, tap **Rename** at the top right (the button is hidden during a remote session).
 3. The **Rename a computer** window lists every computer with its ID and current name.
 4. Change the name in that computer's field (up to 80 characters) and tap **Save** next to it.
-5. The page reloads and the card shows the new name right away. The same name is stored on the companion, so the native manager app and `https://smartdesktopaccess.duckdns.org/companion/` show it too.
+5. The page reloads (only if no remote session is open) and the card shows the new name right away. The same name is stored on the companion, so the native manager app and `https://smartdesktopaccess.duckdns.org/companion/` show it too.
 
 The companion admin page already has its own Rename control (it prompts for a name and `PATCH`es `/api/v1/devices/<id>`). Either path wins if it is the latest change: `sync_web_peers.py` keeps a last-synced name in `/var/lib/sda-companion/web-alias-state.json` and uses last-changed-wins between the web address book and the companion.
 
