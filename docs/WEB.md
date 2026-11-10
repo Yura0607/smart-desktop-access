@@ -96,9 +96,31 @@ To lower memory on iPad only (Mac is unchanged):
 
 Forcing Flutter’s HTML renderer on iPad was tried and not kept: it did not improve the session in WebKit, and Flutter already auto-selects HTML on mobile/iPad (`flt-renderer="html (auto-selected)"`). CanvasKit is left alone on a real Mac.
 
-If the relay drops while the page is still up, the client silently reconnects to the same ID up to 3 times (not after the user taps close, and not before the first frame / peer info). If Safari reloads the tab mid-session, `sessionStorage` remembers the ID and auto-resumes up to 3 times, then stops so a crash cannot loop forever. After a minute of stable video the resume counter resets.
+If the relay drops while the page is still up, the client silently reconnects to the same ID up to 3 times (not after the user taps close, and not before the first frame / peer info). Auto-resume after a full tab reload is disabled: that path called `setByName('connect')` before Flutter finished starting and left a white screen. After an unexpected reload the user sees the computer list again (a clean list is better than a blank page). In-page reconnect does not reload the tab.
 
-Breadcrumbs: `GET`/`POST /webclient/sda-log?e=...` (204, logged by nginx). Events include `load`, `connect`, `beat` (every 30s while a frame is flowing), `pagehide`, `pageshow`, `visibility`, `jserror`, `unhandled`, `reconnect`, `resume`, and `userclose`. Query fields are `e`, `id`, `ff`, `conn`, `ipad`, `rndr`, `vis`, `pers`, `n`, `why`, `mem` (Chrome only), `t`. No tokens or passwords. `jserror` and `unhandled` are logged at most once every 10 seconds per message so a noisy Flutter exception cannot flood the log.
+## White screen after reload (iPad)
+
+Yuriy’s real iPad (05:10–05:16 UTC, 10 Nov 2026) loaded `/webclient/` three times in four seconds, each with `jserror` `NoSuchMethodError: method not found: 'apply' on null` before any connect. A later session (`310906599`) showed video (`ff=1`), then `jserror` `Instance of minified:az` at 05:16:03 and 05:16:13 (throttled), then at 05:16:17 a full `GET /webclient/` 200 with `pagehide pers=0` and `visibility=hidden` tore down the relay. The following load logged `resume n=1`, the same `apply` on null, `pageshow`, and nothing more — a white screen.
+
+Causes:
+
+1. Flutter’s bootstrap (`aHo`) calls `window.isMobile()`, `window.init()`, and `window.getByName('version')` through JS-interop `obj[name].apply(obj, args)` (`A.lW.af` / `Hs`). `loadMainDartJs()` runs immediately, but `js/dist/index.js` is `type=module` (deferred), so those functions were often still `null` → `NoSuchMethodError: method not found: 'apply' on null`. After that throw Flutter never painted.
+
+2. There is no `location.reload` / `location.href =` / `location.replace` / `history.go` / `window.open` in the live session JS (rename’s reload still runs only after Save when `window.curConn` is unset). `main.dart.js` only *reads* `location` for routing. The jserror handler only sends a breadcrumb; it does not navigate. `pagehide pers=0` plus a new document GET means the document unloaded while JS could still beacon — a real navigation or a WebKit-initiated recovery reload (not a hard crash, which would not send `pagehide`).
+
+3. `Instance of minified:az` is Dart’s default `toString` for class `az`. In this build `A.az` is the `dart:html` Event interceptor (`gY4` → `event.target`). During a session the RGBA path is JS `onRgba(pixels)` → `A.ahJ` → `A.adQ` → `decodeImageFromPixels` (`A.aQF` / `$.ah().UB`). On the HTML renderer (iPad’s auto-selected renderer) that builds a BMP (`A.b6h`: `122 + width*height*4` bytes and a JS pixel copy) every frame, then decodes it (`mX`). A decode/image failure surfaces as a DOM Event, which stringifies as `Instance of minified:az`. Widget `update image` errors are already caught inside Flutter (`A.adP`). A flood of those exceptions plus the large per-frame BMP churn matches Safari then unloading the tab.
+
+Fixes (Mac unchanged: VP9 worker stays on, HTML-renderer is not forced):
+
+- `index.html` installs stubs for `window.isMobile`, `window.init`, `window.getByName`, and `window.setByName` *before* `main.dart.js` loads. Early `init` calls are queued and flushed when the real module arrives (`window.__sdaRealInit`).
+- RGBA and `onGlobalEvent` callbacks are wrapped (`sdaSafeOnRgba`, `sdaSafeGlobalEvent`) so a Dart/JS exception cannot become an uncaught page error.
+- Companion one-click auto-connect waits until Flutter has registered `onGlobalEvent` *and* `flt-glass-pane` / `flutter-view` exist; it will not call a stub `setByName`. If auto-connect throws, it clears `sda-connect-id` and leaves the list.
+- Auto-resume-after-reload is off (`resume-skip` breadcrumb). Leftover `sda-resume-active` / resume `sda-connect-id` are cleared on load.
+- If Flutter never paints a view (8s, checked again at 14s), a purple fallback offers **Show my computers** instead of a blank page. That button is the only remaining navigation, and only after a tap.
+
+Breadcrumbs: `GET`/`POST /webclient/sda-log?e=...` (204, logged by nginx). Events include `load`, `connect`, `beat` (every 30s while a frame is flowing), `pagehide`, `pageshow`, `visibility`, `jserror`, `unhandled`, `reconnect`, `resume-skip`, `rgba-err`, `cb-err`, `white-fallback`, and `userclose`. Query fields are `e`, `id`, `ff`, `conn`, `ipad`, `rndr`, `vis`, `pers`, `n`, `why`, `mem` (Chrome only), `t`. No tokens or passwords. `jserror`, `unhandled`, `rgba-err`, and `cb-err` are logged at most once every 10 seconds per message so a noisy Flutter exception cannot flood the log.
+
+If an iPad still shows a white screen after this update, close every `smartdesktopaccess.duckdns.org` tab, then Settings → Safari → Advanced → Website Data → remove `smartdesktopaccess.duckdns.org`, and open `/webclient/` in a new tab.
 
 ## Connecting dialog and keyboard focus
 
