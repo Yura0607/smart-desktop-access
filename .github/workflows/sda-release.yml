@@ -1,0 +1,56 @@
+name: Smart Desktop Access release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub Release tag that receives the installers
+        required: false
+        default: preview
+        type: string
+  push:
+    tags:
+      - "sda-v*"
+
+# Unsigned builds only. Signing secrets from the upstream project are not used.
+# iOS is an unsigned artifact; see docs/RELEASE_NOTES.md for sideloading limits.
+
+jobs:
+  client:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      publish-update-metadata: false
+      variant: client
+      product-build: true
+
+  admin:
+    needs: [client]
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      publish-update-metadata: false
+      variant: admin
+      product-build: true
+
+  notes:
+    needs: [admin]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Describe the release
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          prerelease: true
+          body_path: docs/RELEASE_NOTES.md

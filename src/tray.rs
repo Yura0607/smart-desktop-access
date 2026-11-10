@@ -84,14 +84,13 @@ fn make_tray() -> hbb_common::ResultType<()> {
         if count == 0 {
             format!(
                 "{} {}",
-                crate::get_app_name(),
+                crate::product::display_name(),
                 translate("Service is running".to_owned()),
             )
         } else {
             format!(
-                "{} - {}\n{}",
-                crate::get_app_name(),
-                translate("Ready".to_owned()),
+                "{} - Session active\n{}",
+                crate::product::display_name(),
                 translate("{".to_string() + &format!("{count}") + "} sessions"),
             )
         }

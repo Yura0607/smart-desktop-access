@@ -2937,6 +2937,10 @@ impl Connection {
                         return false;
                     }
                     self.file_transfer = Some((ft.dir, ft.show_hidden));
+                    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+                    {
+                        self.enable_file_transfer = true;
+                    }
                 }
                 Some(login_request::Union::ViewCamera(_vc)) => {
                     if !Self::permission(keys::OPTION_ENABLE_CAMERA, &self.control_permissions) {

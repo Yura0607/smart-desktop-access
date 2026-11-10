@@ -4,7 +4,7 @@ stdout.println("is_xfce: ", is_xfce);
 
 // See default height in common.tis `msgbox()`.
 const msgbox_default_height = 180;
-const incoming_only_width = 180;
+const incoming_only_width = 280;
 
 const outgoing_only = handler.is_outgoing_only();
 const incoming_only = handler.is_incoming_only();
@@ -19,10 +19,17 @@ const hide_websocket_settings = handler.get_builtin_option("hide-websocket-setti
 const hide_stop_service = handler.get_builtin_option("hide-stop-service") == "Y";
 const disable_change_permanent_password = handler.get_builtin_option("disable-change-permanent-password") == "Y";
 const disable_change_id = handler.get_builtin_option("disable-change-id") == "Y";
+var display_name = handler.get_builtin_option("display-name");
+if (!display_name) display_name = handler.get_app_name();
+var source_url = handler.get_builtin_option("source-url");
+if (!source_url) source_url = "https://github.com/Yura0607/smart-desktop-access";
+var download_page_url = handler.get_builtin_option("download-page-url");
+if (!download_page_url) download_page_url = source_url;
+var legal_copyright = handler.get_builtin_option("legal-copyright");
 
 // html min-width, min-height not working on mac, below works for all
 if (incoming_only) {
-  view.windowMinSize = (scaleIt(incoming_only_width), scaleIt((handler.is_installed() || disable_installation) ? 300 : 390));
+  view.windowMinSize = (scaleIt(incoming_only_width), scaleIt((handler.is_installed() || disable_installation) ? 360 : 480));
 } else {
   view.windowMinSize = (scaleIt(560), scaleIt(300));
 }
@@ -547,7 +554,7 @@ class MyIdMenu: Reactor.Component {
                 <li #allow-darktheme><span>{svg_checkmark}</span>{translate('Dark Theme')}</li>
                 <Languages />
                 {disable_installation ? "" : <li #allow-auto-update><span>{svg_checkmark}</span>{translate('Auto update')}</li>} 
-                <li #about>{translate('About')} {" "}{handler.get_app_name()}</li>
+                <li #about>{translate('About')} {" "}{display_name}</li>
             </menu>
         </popup>;
     }
@@ -597,15 +604,14 @@ class MyIdMenu: Reactor.Component {
     }
 
     function showAbout() {
-        var name = handler.get_app_name();
+        var name = display_name;
+        var copy = legal_copyright ? legal_copyright : "Copyright &copy; 2026 Yuriy. Based on RustDesk.";
         msgbox("custom-nocancel-nook-hasclose", translate("About") + " " + name, "<div style='line-height: 2em'> \
             <div>Version: " + handler.get_version() + " \
             <div>Fingerprint: " + handler.get_fingerprint() + " \
-            <div .link .custom-event url='https://rustdesk.com/privacy.html'>" + translate("Privacy Statement") + "</div> \
-            <div .link .custom-event url='https://rustdesk.com'>" + translate("Website") + "</div> \
-	    <div style='background: #2c8cff; color: white; padding: 1em; margin-top: 1em;'>Copyright &copy; 2026 Purslane Tech Pte. Ltd.\
+            <div .link .custom-event url='" + source_url + "'>" + translate("Website") + "</div> \
+            <div style='background: #3B5BFF; color: white; padding: 1em; margin-top: 1em;'>" + copy + "\
             <br />" + handler.get_license() + " \
-            <p style='font-weight: bold'>" + translate("Slogan_tip") + "</p>\
             </div>\
         </div>", "", function(el) {
             if (el && el.attributes) {
@@ -720,6 +726,7 @@ class App: Reactor.Component
                             {outgoing_only ? <span .link #open-settings style="position:absolute; right:0; bottom:0; transform:scale(0.6); transform-origin:right bottom; opacity:0.85">{svg_menu}</span> : ""}
                         </div>
                         <div .lighter-text>{outgoing_only ? translate('outgoing_only_desk_tip') : translate('desk_tip')}</div>
+                        {incoming_only ? <SdaSetupCard /> : ""}
                         {outgoing_only ? <div style="position:absolute; left:-10000px; top:-10000px; width:0; height:0; overflow:hidden"><MyIdMenu /></div> : ""}
                         {!outgoing_only && <div .your-desktop>
                             <MyIdMenu />
@@ -766,6 +773,50 @@ class App: Reactor.Component
 
     function newRemote(type) {
         createNewConnect(this.remote_id.value, type);
+    }
+}
+
+class SdaSetupCard: Reactor.Component {
+    function this() {
+        this.savedEmail = (handler.get_option("sda-email") || "").trim();
+        this.email = this.savedEmail;
+        this.name = (handler.get_option("sda-client-name") || "").trim();
+    }
+
+    function render() {
+        var typedEmail = (this.email || "").trim();
+        if (this.savedEmail && typedEmail == this.savedEmail) return <div />;
+        return <div .sda-setup>
+            <div .title>Your email address</div>
+            <div .lighter-text>Type the email address this computer should be listed under, then click Save.</div>
+            <input|text .sda-name novalue="Name this computer" value={this.name} maxlength="80" />
+            <input|text .sda-email novalue="name@example.com" value={this.email} />
+            <div style="margin-top:8px; text-align:right">
+                <button .button #sda-save>Save</button>
+            </div>
+        </div>;
+    }
+
+    event change $(input.sda-name) (_, el) {
+        this.name = el.value || "";
+    }
+
+    event change $(input.sda-email) (_, el) {
+        this.email = el.value || "";
+        this.update();
+    }
+
+    event click $(button#sda-save) {
+        var nameEl = this.$(input.sda-name);
+        var emailEl = this.$(input.sda-email);
+        var name = nameEl ? (nameEl.value || "").trim() : "";
+        var email = emailEl ? (emailEl.value || "").trim() : "";
+        handler.set_option("sda-client-name", name);
+        handler.set_option("sda-email", email);
+        this.name = name;
+        this.email = email;
+        this.savedEmail = email;
+        this.update();
     }
 }
 
@@ -834,10 +885,10 @@ class UpdateMe: Reactor.Component {
     }
 
     event click $(#install-me) {
-        handler.open_url("https://rustdesk.com/download");
+        handler.open_url(download_page_url);
         return;
         if (!is_win) {
-            handler.open_url("https://rustdesk.com");
+            handler.open_url(download_page_url);
             return;
         }
         var url = software_update_url + '.' + handler.get_software_ext();
@@ -1387,9 +1438,9 @@ function self.ready() {
             view.move(r[0], r[1], incoming_only ? scaleIt(incoming_only_width) : r[2], r[3]);
         }
     } else {
-        centerize(scaleIt(incoming_only ? incoming_only_width : 800), scaleIt(incoming_only ? 390 : 600));
+        centerize(scaleIt(incoming_only ? incoming_only_width : 800), scaleIt(incoming_only ? 520 : 600));
     }
-    if (!handler.get_remote_id()) {
+    if (!incoming_only && !handler.get_remote_id()) {
         view.focus = $(#remote_id);
     }
     refreshCurrentUser();

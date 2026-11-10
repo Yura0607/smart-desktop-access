@@ -43,6 +43,7 @@ fn finish_macos_update(result: hbb_common::ResultType<()>) -> Option<CoreMainAct
 /// If it returns [`Some`], the action determines whether to start the UI or report failure.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn core_main() -> Option<CoreMainAction> {
+    crate::product::apply();
     if !crate::common::global_init() {
         return None;
     }
@@ -214,6 +215,12 @@ pub fn core_main() -> Option<CoreMainAction> {
         {
             crate::platform::try_remove_temp_update_files();
             hbb_common::config::PeerConfig::preload_peers();
+        }
+        #[cfg(any(windows, target_os = "macos"))]
+        if hbb_common::config::is_outgoing_only()
+            && hbb_common::config::Config::get_option("start-at-login") != "N"
+        {
+            crate::platform::set_login_autostart(true);
         }
         std::thread::spawn(move || crate::start_server(false, no_server));
     } else {

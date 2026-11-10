@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Desktop Access</title>
+  <script>
+    (function () {
+      var hash = location.hash || "";
+      var dest = "/webclient/";
+      if (hash.indexOf("share_token=") !== -1) {
+        var q = hash.replace(/^#\/?/, "");
+        if (q.charAt(0) !== "?") q = "?" + q;
+        dest = "/webclient/#/" + q;
+      } else {
+        var match = hash.match(/[?&]id=(\d+)/) || hash.match(/#\/(\d+)/);
+        if (match) dest = "/webclient/#/?id=" + encodeURIComponent(match[1]);
+      }
+      location.replace(dest);
+    })();
+  </script>
+</head>
+<body>Opening the web client…</body>
+</html>

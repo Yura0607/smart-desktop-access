@@ -870,7 +870,16 @@ class RustdeskImpl {
   }
 
   String mainGetAppNameSync({dynamic hint}) {
-    return js.context.callMethod('getByName', ['app-name']);
+    try {
+      final name = js.context.callMethod('getByName', ['app-name']);
+      final text = '$name';
+      if (text.isNotEmpty && text != 'null' && text != 'RustDesk') {
+        return text;
+      }
+    } catch (_) {}
+    return const String.fromEnvironment('SDA_VARIANT') == 'client'
+        ? 'SmartDesktopAccess'
+        : 'SmartDesktopAccessAdmin';
   }
 
   String mainUriPrefixSync({dynamic hint}) {
@@ -1699,11 +1708,11 @@ class RustdeskImpl {
   }
 
   bool isIncomingOnly({dynamic hint}) {
-    return false;
+    return const String.fromEnvironment('SDA_VARIANT') == 'client';
   }
 
   bool isOutgoingOnly({dynamic hint}) {
-    return false;
+    return const String.fromEnvironment('SDA_VARIANT') != 'client';
   }
 
   bool isCustomClient({dynamic hint}) {
@@ -1856,7 +1865,24 @@ class RustdeskImpl {
   }
 
   String mainGetBuildinOption({required String key, dynamic hint}) {
-    return mainGetLocalOption(key: key, hint: hint);
+    const variant = String.fromEnvironment('SDA_VARIANT');
+    switch (key) {
+      case 'companion-url':
+        return 'https://smartdesktopaccess.duckdns.org/companion';
+      case 'source-url':
+        return 'https://github.com/Yura0607/smart-desktop-access';
+      case 'download-page-url':
+        return 'https://github.com/Yura0607/smart-desktop-access/releases/latest';
+      case 'display-name':
+        return variant == 'client'
+            ? 'Smart Desktop Access'
+            : 'Smart Desktop Access Admin';
+      case 'hide-powered-by-me':
+      case 'hide-server-settings':
+        return 'Y';
+      default:
+        return mainGetLocalOption(key: key, hint: hint);
+    }
   }
 
   String installInstallOptions({dynamic hint}) {

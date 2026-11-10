@@ -341,7 +341,7 @@ div.install-me, div.trust-me {
     margin-top: 0.5em;
     padding: 20px;
     color: white;
-    background: linear-gradient(left,#e242bc,#f4727c);
+    background: linear-gradient(left,#7C3AED,#3B5BFF);
 }
 
 div.trust-me > div:nth-child(1),
@@ -438,4 +438,25 @@ textarea.grey-text {
     div.eye-area > input {
         font-size: 1em;
     }
+}
+div.sda-setup {
+    margin: 8px 0 4px 0;
+    padding: 10px;
+    background: #F3F0FF;
+    border-radius: 8px;
+}
+
+html.darktheme div.sda-setup {
+    background: #2A2448;
+}
+
+div.sda-setup > div.title {
+    font-weight: bold;
+    margin-bottom: 4px;
+}
+
+div.sda-setup input {
+    display: block;
+    width: *;
+    margin-top: 6px;
 }
