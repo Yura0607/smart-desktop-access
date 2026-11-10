@@ -30,8 +30,12 @@ On the VM, as a user who can `sudo`:
 
 ```sh
 sudo useradd --system --create-home --home-dir /var/lib/sda-companion sda || true
-sudo mkdir -p /opt/sda-companion /var/lib/sda-companion
+sudo mkdir -p /opt/sda-companion /var/lib/sda-companion /etc/sda
 sudo apt-get install -y python3-cryptography
+sudo openssl rand -out /etc/sda/secret.key 32
+sudo chown root:sda /etc/sda /etc/sda/secret.key
+sudo chmod 750 /etc/sda
+sudo chmod 640 /etc/sda/secret.key
 sudo cp companion.py email_text.py notes.py /opt/sda-companion/
 sudo cp -a web /opt/sda-companion/web
 sudo cp sda-companion.env.example /etc/sda-companion.env
@@ -100,6 +104,6 @@ hbbs and hbbr stay on 21116 and 21117. Do not change their config for this. Old 
 
 ## Backups
 
-Back up all of `/var/lib/sda-companion`. That directory holds `devices.json`, `notes.json`, `notes.key`, and `admin-token`. `notes.json` has the work log in plain text and credentials only as ciphertext. Restoring `notes.json` without `notes.key` makes the stored passwords unreadable. Do not commit either file.
+Back up all of `/var/lib/sda-companion` and `/etc/sda/secret.key`. The data directory holds `devices.json`, `notes.json`, `notes.key`, and `admin-token`. `devices.json` stores each device `password` and `device_token` as AES-256-GCM (`enc:v1:<nonce>:<ciphertext>`). The key lives at `/etc/sda/secret.key` (root:sda, mode 640) and is never kept in the repo or the data directory. Restoring `devices.json` without that key makes the stored access codes unreadable. `notes.json` has the work log in plain text and credentials only as ciphertext. Restoring `notes.json` without `notes.key` makes the stored note passwords unreadable. Do not commit the key files.
 
 Registration is open on purpose: the client program cannot keep a secret. After the first registration the device token blocks overwrites. Do not put the admin token in the client build.

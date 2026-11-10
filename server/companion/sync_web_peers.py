@@ -96,7 +96,15 @@ def save_state(state: dict) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
     tmp.replace(STATE_PATH)
+    try:
+        os.chmod(STATE_PATH, 0o600)
+    except OSError:
+        pass
 
 
 def push_alias(token: str, device_id: str, alias: str) -> None:
@@ -186,12 +194,16 @@ def main() -> None:
             if not name:
                 name = device_id
             online = bool(device.get("online"))
-            # The bundled web client paints "{username}@{hostname}" and still
-            # inserts "@" when username is empty. FromAddressBook also skips
-            # alias, so the card title is the ID and the subtitle comes from
-            # these two fields. Result: "Yuriy's Dell Laptop@Online".
+            # Do not put Online/Offline in hostname. The Flutter card subtitle
+            # is "{username}@{hostname}", which became "Name@Offline". Status
+            # is the address-book `online` column plus /api/v1/web-status.
+            # Include every non-deactivated companion device; do not filter
+            # by online or recent activity.
             username = name
-            labeled = "Online" if online else "Offline"
+            host = str(device.get("hostname") or device.get("client_name") or "").strip()
+            if host.lower() in ("online", "offline"):
+                host = ""
+            labeled = host
             alias = name
             password = str(device.get("password") or "")
             hashed = (

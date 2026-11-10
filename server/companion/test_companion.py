@@ -17,6 +17,9 @@ class CompanionTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         os.environ["COMPANION_ADMIN_TOKEN"] = "test-token"
+        key_path = Path(self.tmp.name) / "secret.key"
+        key_path.write_bytes(os.urandom(32))
+        os.environ["SDA_SECRET_KEY_FILE"] = str(key_path)
         self.server = companion.serve("127.0.0.1", 0, Path(self.tmp.name))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -554,6 +557,138 @@ class CompanionTest(unittest.TestCase):
         stored = (data_dir / "notes.json").read_text(encoding="utf-8")
         self.assertNotIn(spare_secret, stored)
         self.assertNotIn(spare["invite"], json.loads(stored)["owners"])
+
+    def test_web_status_hides_secrets_and_lists_offline(self):
+        status, created = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Marys-Mac",
+                "email": "mary@example.com",
+                "password": "secret-password",
+                "platform": "macos",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(created.get("device_token"))
+        status, renamed = self.request(
+            "PATCH",
+            "/api/v1/devices/123456789",
+            {"alias": "Mary Laptop"},
+            token="test-token",
+        )
+        self.assertEqual(status, 200)
+
+        status, denied = self.request("GET", "/api/v1/web-status")
+        self.assertEqual(status, 401)
+
+        status, body = self.request("GET", "/api/v1/web-status", token="test-token")
+        self.assertEqual(status, 200)
+        devices = body.get("devices") or []
+        self.assertEqual(len(devices), 1)
+        row = devices[0]
+        self.assertEqual(row["id"], "123456789")
+        self.assertEqual(row["alias"], "Mary Laptop")
+        self.assertEqual(row["hostname"], "Marys-Mac")
+        self.assertTrue(row["online"])
+        blob = json.dumps(body)
+        self.assertNotIn("secret-password", blob)
+        self.assertNotIn(created["device_token"], blob)
+        self.assertNotIn("password", row)
+        self.assertNotIn("device_token", row)
+        self.assertNotIn("email", row)
+
+    def test_device_secrets_are_encrypted_at_rest(self):
+        secret = "secret-password"
+        status, created = self.request(
+            "POST",
+            "/api/v1/devices",
+            {
+                "id": "123456789",
+                "hostname": "Marys-Mac",
+                "email": "mary@example.com",
+                "password": secret,
+                "platform": "macos",
+            },
+        )
+        self.assertEqual(status, 200)
+        token = created["device_token"]
+        self.assertTrue(token)
+        self.assertFalse(token.startswith(companion.ENC_PREFIX))
+
+        stored = json.loads(Path(self.tmp.name, "devices.json").read_text(encoding="utf-8"))
+        record = stored["devices"]["123456789"]
+        self.assertTrue(record["password"].startswith(companion.ENC_PREFIX))
+        self.assertTrue(record["device_token"].startswith(companion.ENC_PREFIX))
+        self.assertNotIn(secret, json.dumps(stored))
+        self.assertNotIn(token, json.dumps(stored))
+
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(status, 200)
+        self.assertEqual(listed["devices"][0]["password"], secret)
+        self.assertNotIn("device_token", listed["devices"][0])
+
+        status, public = self.request("GET", "/api/v1/web-status", token="test-token")
+        self.assertEqual(status, 200)
+        self.assertNotIn(secret, json.dumps(public))
+
+    def test_migrates_legacy_plaintext_secrets_on_startup(self):
+        self.server.shutdown()
+        self.server.server_close()
+        data_dir = Path(self.tmp.name)
+        legacy = {
+            "devices": {
+                "123456789": {
+                    "id": "123456789",
+                    "hostname": "Office-PC",
+                    "email": "pat@example.com",
+                    "password": "legacy-password",
+                    "device_token": "legacy-device-token",
+                    "first_seen": 1,
+                    "last_seen": 1,
+                }
+            }
+        }
+        (data_dir / "devices.json").write_text(json.dumps(legacy), encoding="utf-8")
+        self.server = companion.serve("127.0.0.1", 0, data_dir)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.base = "http://127.0.0.1:%s" % self.server.server_address[1]
+
+        stored = json.loads((data_dir / "devices.json").read_text(encoding="utf-8"))
+        record = stored["devices"]["123456789"]
+        self.assertTrue(record["password"].startswith(companion.ENC_PREFIX))
+        self.assertTrue(record["device_token"].startswith(companion.ENC_PREFIX))
+        blob = json.dumps(stored)
+        self.assertNotIn("legacy-password", blob)
+        self.assertNotIn("legacy-device-token", blob)
+
+        status, listed = self.request("GET", "/api/v1/devices", token="test-token")
+        self.assertEqual(status, 200)
+        self.assertEqual(listed["devices"][0]["password"], "legacy-password")
+
+        status, updated = self.request(
+            "POST",
+            "/api/v1/devices",
+            {"id": "123456789", "hostname": "Office-PC", "device_token": "legacy-device-token"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["device_token"], "legacy-device-token")
+
+    def test_save_state_writes_private_file(self):
+        import sync_web_peers
+
+        path = Path(self.tmp.name) / "web-alias-state.json"
+        old = sync_web_peers.STATE_PATH
+        sync_web_peers.STATE_PATH = path
+        try:
+            sync_web_peers.save_state({"123456789": {"alias": "Front desk"}})
+        finally:
+            sync_web_peers.STATE_PATH = old
+        self.assertTrue(path.is_file())
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["123456789"]["alias"], "Front desk")
 
     def test_notes_rate_limit(self):
         status, _ = self._register()

@@ -10,6 +10,7 @@ Run `python3 companion.py` after reading README.md. Do not commit the env file.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import secrets
@@ -24,6 +25,8 @@ from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 import email_text
 import notes as client_notes
 
@@ -37,6 +40,76 @@ MAX_HOSTNAME_LEN = 128
 MAX_ID_LEN = 64
 MAX_NOTE_LEN = 500
 INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+ENC_PREFIX = "enc:v1:"
+DEFAULT_SECRET_KEY_FILE = Path("/etc/sda/secret.key")
+
+
+class SecretBox:
+    """AES-256-GCM helper for device secrets stored in devices.json."""
+
+    def __init__(self, key: bytes) -> None:
+        if len(key) != 32:
+            raise ValueError("secret key must be 32 bytes")
+        self._aesgcm = AESGCM(key)
+
+    @classmethod
+    def from_file(cls, path: Path) -> "SecretBox":
+        raw = path.read_bytes()
+        if len(raw) == 32:
+            return cls(raw)
+        try:
+            decoded = bytes.fromhex(raw.strip().decode("ascii"))
+        except (UnicodeDecodeError, ValueError) as err:
+            raise ValueError("secret key file must contain 32 raw bytes or 64 hex chars") from err
+        if len(decoded) != 32:
+            raise ValueError("secret key file must contain 32 raw bytes or 64 hex chars")
+        return cls(decoded)
+
+    def encrypt(self, plaintext: str) -> str:
+        if not plaintext:
+            return plaintext
+        if plaintext.startswith(ENC_PREFIX):
+            return plaintext
+        nonce = os.urandom(12)
+        token = self._aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+        return (
+            ENC_PREFIX
+            + base64.urlsafe_b64encode(nonce).decode("ascii")
+            + ":"
+            + base64.urlsafe_b64encode(token).decode("ascii")
+        )
+
+    def decrypt(self, value: str) -> str:
+        if not value:
+            return ""
+        if not value.startswith(ENC_PREFIX):
+            return value
+        rest = value[len(ENC_PREFIX) :]
+        nonce_b64, sep, token_b64 = rest.partition(":")
+        if not sep or not nonce_b64 or not token_b64:
+            raise ValueError("malformed stored secret")
+        nonce = base64.urlsafe_b64decode(nonce_b64.encode("ascii"))
+        token = base64.urlsafe_b64decode(token_b64.encode("ascii"))
+        return self._aesgcm.decrypt(nonce, token, None).decode("utf-8")
+
+
+def secret_key_path() -> Path:
+    configured = (os.environ.get("SDA_SECRET_KEY_FILE") or "").strip()
+    if configured:
+        return Path(configured)
+    cred_dir = (os.environ.get("CREDENTIALS_DIRECTORY") or "").strip()
+    if cred_dir:
+        candidate = Path(cred_dir) / "secret.key"
+        if candidate.is_file():
+            return candidate
+    return DEFAULT_SECRET_KEY_FILE
+
+
+def load_secret_box() -> SecretBox:
+    path = secret_key_path()
+    if not path.is_file():
+        raise FileNotFoundError("missing secret key file: %s" % path)
+    return SecretBox.from_file(path)
 
 
 def now() -> int:
@@ -72,12 +145,14 @@ class RateLimiter:
 
 
 class Store:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, box: SecretBox | None = None):
         self.path = path
+        self._box = box or load_secret_box()
         self._lock = threading.Lock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self._write({"devices": {}})
+        self._migrate_plaintext()
 
     def _read(self) -> dict[str, Any]:
         try:
@@ -93,6 +168,32 @@ class Store:
         except OSError:
             pass
         temporary.replace(self.path)
+
+    def _reveal(self, value: Any) -> str:
+        return self._box.decrypt(str(value or ""))
+
+    def _protect(self, value: str) -> str:
+        return self._box.encrypt(value)
+
+    def _migrate_plaintext(self) -> None:
+        with self._lock:
+            data = self._read()
+            changed = 0
+            for record in data.get("devices", {}).values():
+                if not isinstance(record, dict):
+                    continue
+                for field in ("password", "device_token"):
+                    raw = record.get(field)
+                    if not isinstance(raw, str) or not raw:
+                        continue
+                    if raw.startswith(ENC_PREFIX):
+                        self._box.decrypt(raw)
+                        continue
+                    record[field] = self._box.encrypt(raw)
+                    changed += 1
+            if changed:
+                self._write(data)
+                print("companion: encrypted %s stored secrets" % changed)
 
     def upsert(self, payload: dict[str, Any]) -> dict[str, Any]:
         device_id = str(payload.get("id") or "").strip()
@@ -112,7 +213,7 @@ class Store:
             data = self._read()
             devices = data.setdefault("devices", {})
             current = devices.get(device_id, {})
-            token = str(current.get("device_token") or "")
+            token = self._reveal(current.get("device_token"))
             presented = str(payload.get("device_token") or "")
             if token and presented != token:
                 raise PermissionError("device token")
@@ -120,7 +221,7 @@ class Store:
                 token = secrets.token_urlsafe(24)
             stamp = now()
             email = str(payload.get("email") or current.get("email") or "").strip()
-            password = str(payload.get("password") or current.get("password") or "")
+            password = str(payload.get("password") or "") or self._reveal(current.get("password"))
             # The client must not replace a name the admin set.
             alias = str(current.get("alias") or "").strip()
             if "client_name" in payload:
@@ -140,10 +241,10 @@ class Store:
                 "id": device_id,
                 "hostname": str(payload.get("hostname") or current.get("hostname") or ""),
                 "email": email,
-                "password": password,
+                "password": self._protect(password),
                 "platform": str(payload.get("platform") or current.get("platform") or ""),
                 "version": str(payload.get("version") or current.get("version") or ""),
-                "device_token": token,
+                "device_token": self._protect(token),
                 "first_seen": int(current.get("first_seen") or stamp),
                 "last_seen": stamp,
             }
@@ -162,6 +263,8 @@ class Store:
             devices[device_id] = record
             self._write(data)
             result = dict(record)
+            result["password"] = password
+            result["device_token"] = token
             if linked:
                 result["_linked_from"] = str(linked.get("invite") or "")
             return result
@@ -173,6 +276,7 @@ class Store:
         rows = []
         for device in devices.values():
             row = dict(device)
+            row["password"] = self._reveal(row.get("password"))
             row.pop("device_token", None)
             row["online"] = stamp - int(row.get("last_seen") or 0) <= ONLINE_SECONDS
             rows.append(row)
@@ -276,7 +380,7 @@ class Store:
                 return "missing"
             if not current.get("deactivated"):
                 return "active"
-            expected = str(current.get("device_token") or "")
+            expected = self._reveal(current.get("device_token"))
             if not expected or token != expected:
                 return "denied"
             devices.pop(device_id, None)
@@ -515,6 +619,27 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                     self._send(401, {"error": "unauthorized"})
                     return
                 self._send(200, {"devices": store.list_devices(), "pending": store.list_pending()})
+                return
+            if path == "/api/v1/web-status":
+                if self._too_fast("admin"):
+                    return
+                if not self._authorized_web_user():
+                    return
+                public = []
+                for row in store.list_devices():
+                    if row.get("deactivated"):
+                        continue
+                    device_id = str(row.get("id") or "").strip()
+                    if not device_id:
+                        continue
+                    public.append({
+                        "id": device_id,
+                        "alias": str(row.get("alias") or "").strip(),
+                        "hostname": str(row.get("hostname") or row.get("client_name") or "").strip(),
+                        "platform": str(row.get("platform") or "").strip(),
+                        "online": bool(row.get("online")),
+                    })
+                self._send(200, {"devices": public})
                 return
             parts = _device_parts(path)
             if parts is not None and parts[1:] == ["notes"]:
