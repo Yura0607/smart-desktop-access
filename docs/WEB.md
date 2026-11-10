@@ -53,7 +53,7 @@ Companion-registered devices are copied into rustdesk-api's address book for use
 
 Each run reads the companion device list in place (the companion token from `/etc/sda-companion.env` or `/var/lib/sda-companion/admin-token`; the script never prints tokens or passwords), then upserts rows in `/opt/rustdesk-api/data/rustdeskapi.db` for `user_id` of `yuriy` and `collection_id` 0 (the personal book used by `/api/server-config`). It does not write into other collections. The display name is the companion alias if set, otherwise the hostname. Online status is stored as the hostname field `Online` / `Offline` because rustdesk-api's web-client payload does not copy alias or a live online flag; the cards therefore read like `Yuriy's Dell Laptop@Online`. The address-book `hash` column is base64 of the device's permanent password.
 
-Removed or deactivated companion devices are deleted from that managed set (rows tagged `["sda-companion"]`). New installs and renames show up within about two minutes.
+Removed or deactivated companion devices are deleted from that managed set (rows tagged `["sda-companion"]`). New installs and online/offline changes show up within about two minutes. A rename made in `/webclient/` or in the companion admin is written to the companion first and then synced into the address book immediately, so the web list updates on the next page load rather than after the timer.
 
 `/api/server-config` then returns those peers to the bundled web client. A small patch in rustdesk-api's web JS (`resources/web/js/src/ljw.js`, `connection.ts`, and `resources/web/js/dist/index.js`) stores the decoded hash as `plainpwd` and, when the remote sends its salt, calls `login(plainpwd)` so the password is hashed with the live salt and challenge. Putting the raw password bytes in the remembered `password` field skips the salt step and the remote answers "Wrong Password".
 
@@ -61,17 +61,51 @@ That same JS must not reload the page just because a successful login wrote a re
 
 Companion "Connect in browser" opens `/webclient/#/?id=<id>` (and may set `sessionStorage` `sda-connect-id` / `sda-connect-plainpwd` or `postMessage` `{source:'sda-companion', type:'sda-connect'}`). Flutter rewrites the hash to `#/`, so the client also copies the id into `sessionStorage` and calls `setByName('connect', id)` after the address book has been applied.
 
-Safari / iPadOS (desktop UA included) often reports WASM SIMD but the SIMD VP9 decoder does not produce frames. The loader uses the non-SIMD `OGVDecoderVideoVP9W` build there and disables `threading` (it needs `SharedArrayBuffer`). Frames that arrive before the decoder is ready are ignored instead of throwing.
+Safari / iPadOS often reports WASM SIMD but the SIMD VP9 decoder does not produce frames, so the loader uses the non-SIMD `OGVDecoderVideoVP9W` build and disables `threading` (it needs `SharedArrayBuffer`). iPad (including desktop-mode Macintosh UAs with `maxTouchPoints > 1`) also runs that decoder on the main thread; a real Mac keeps the worker. Frames that arrive before the decoder is ready are ignored instead of throwing.
 
 Once the first video frame arrives, the client sends a single Shift key (not Enter, and not any password or PIN) so a locked Windows PC drops the lock-screen clock and shows the sign-in field. On iPad the session toolbar includes the on-screen keyboard; Ctrl+Alt+Del is in the overflow menu (`Insert Ctrl + Alt + Del`) and calls the existing `ctrl_alt_del` handler.
 
 The old `/webclient2/` path (removed upstream) is served from `/var/www/sda-webclient2/index.html` so `/_admin/` "Web Client" links of the form `/webclient2/#/<id>` redirect to `/webclient/#/?id=<id>`.
 
+## iPad Safari vs Mac Safari
+
+A real iPad on iPadOS 13+ often reports itself as Macintosh desktop Safari (`Intel Mac OS X 10_15_7`, Version/27.2) when Request Desktop Website is on. Detect iPad with any of: an `iPad`/`iPhone`/`iPod` UA; a Macintosh UA that also contains `Mobile`; `navigator.platform` of `MacIntel` or `iPad` with `maxTouchPoints > 1`; or a Macintosh UA with `maxTouchPoints > 1`.
+
+On iPad only, VP9 decoding runs on the main thread (`worker: false`) and skips the SIMD wasm (`OGVDecoderVideoVP9W`). Safari on a real Mac (`Macintosh` and `maxTouchPoints <= 1`) is left on `worker: true` with the non-SIMD decoder — that path already worked and must not be changed.
+
+`/webclient/js/dist/` is served with `expires -1` and `Cache-Control: no-cache` so a stale `index.js` does not keep an old decoder. `index.html` is also no-cache and loads `js/dist/index.js` with a cache-busting query. Safari unregisters the Flutter service worker so it cannot pin old wasm/JS.
+
+If an iPad still shows a black screen after an update, close every `smartdesktopaccess.duckdns.org` tab, then on the iPad go to Settings → Safari → Advanced → Website Data, search for `smartdesktopaccess.duckdns.org`, and remove it. Reopen `/webclient/` (a new tab, not a frozen one). Clearing all Safari history is not required.
+
+## Connecting dialog and keyboard focus
+
+The bundled Flutter build treats almost every JS `msgbox` as a dialog with Cancel and OK, and OK navigates home (`closeConnection`). Status dialogs such as "Connecting... / Logging in..." and "Successful / Connected, waiting for image..." are therefore not forwarded from JS. An empty first-frame `msgbox` is treated as a dismiss plus keyboard-focus hook. Flutter's own "waiting for image" loader still closes itself when the first RGBA frame arrives, so the overlay disappears without tapping OK. If that dialog is somehow still visible, Cancel only dismisses it; OK must not be required, and the session stays up after the first frame.
+
+After the first frame (and again after that auto-dismiss), the client focuses Flutter's input host (`flt-glass-pane` / the text-editing host). A physical keyboard, an iPad keyboard case, or the Mac keyboard then reaches the remote PC immediately — no tap on the screen first. The iPad on-screen keyboard still cannot be opened by script without a user gesture; use the toolbar keyboard icon for the OSK.
+
+## Renaming a computer in the browser
+
+The name you set here is the owner's Rename (the companion device name). It is the same name the native manager shows, and it always overrides the computer's self-chosen name.
+
+In the web client:
+
+1. Open `https://smartdesktopaccess.duckdns.org/webclient/` and sign in.
+2. On the computer list, tap **Rename** at the top right (the button is hidden during a remote session).
+3. The **Rename a computer** window lists every computer with its ID and current name.
+4. Change the name in that computer's field (up to 80 characters) and tap **Save** next to it.
+5. The page reloads and the card shows the new name right away. The same name is stored on the companion, so the native manager app and `https://smartdesktopaccess.duckdns.org/companion/` show it too.
+
+The companion admin page already has its own Rename control (it prompts for a name and `PATCH`es `/api/v1/devices/<id>`). Either path wins if it is the latest change: `sync_web_peers.py` keeps a last-synced name in `/var/lib/sda-companion/web-alias-state.json` and uses last-changed-wins between the web address book and the companion.
+
+A rename from `/webclient/` calls `POST /companion/api/v1/web-rename` with the signed-in user's rustdesk-api token. Companion checks `/api/currentUser` (the account is in `name`, not `username`) and allows `yuriy` or `admin`, then writes the alias and runs `sync_web_peers.py` immediately. The overlay script lives at `/opt/rustdesk-api/resources/web/sda-rename.js` and is included from `/webclient/index.html`.
+
+The sync oneshot also keeps `/opt/rustdesk-api/data/rustdeskapi.db` group-writable by `sda` so the companion process (user `sda`) can update the address book itself. The script reads `COMPANION_ADMIN_TOKEN` from the environment or `/var/lib/sda-companion/admin-token`; it does not need world-readable `/etc/sda-companion.env`.
+
 ## Companion pages
 
 The companion service still serves:
 
-- `https://smartdesktopaccess.duckdns.org/companion/` — web admin. After you paste the companion token it lists computers, marks new ones, and sends the install email. It does not move the remote mouse.
+- `https://smartdesktopaccess.duckdns.org/companion/` — web admin. After you paste the companion token it lists computers, marks new ones, sends the install email, and can Rename a computer (same companion alias as the web client). It does not move the remote mouse.
 - `https://smartdesktopaccess.duckdns.org/companion/view` — placeholder. It does not show a screen or take input. Remote control from the browser is the `/webclient/` page above.
 
 ## What a later branded web client would still add

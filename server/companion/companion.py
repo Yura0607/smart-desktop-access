@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 import email_text
 import notes as client_notes
@@ -412,6 +413,43 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
             header = self.headers.get("Authorization", "")
             return bool(admin_token) and header == "Bearer " + admin_token
 
+        def _authorized_web_user(self) -> bool:
+            if self._authorized():
+                return True
+            header = self.headers.get("Authorization", "")
+            if not header.startswith("Bearer "):
+                self._send(401, {"error": "unauthorized"})
+                return False
+            token = header[7:].strip()
+            if not token:
+                self._send(401, {"error": "unauthorized"})
+                return False
+            try:
+                request = Request(
+                    "http://127.0.0.1:21114/api/currentUser",
+                    data=b"{}",
+                    headers={
+                        "Authorization": "Bearer " + token,
+                        "Content-Type": "application/json",
+                    },
+                    method="POST",
+                )
+                with urlopen(request, timeout=8) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except Exception:
+                self._send(401, {"error": "unauthorized"})
+                return False
+            username = ""
+            if isinstance(data, dict):
+                username = str(data.get("username") or data.get("name") or "")
+                inner = data.get("data") or data.get("user")
+                if not username and isinstance(inner, dict):
+                    username = str(inner.get("username") or inner.get("name") or "")
+            if username not in ("yuriy", "admin"):
+                self._send(403, {"error": "forbidden"})
+                return False
+            return True
+
         def _client_ip(self) -> str:
             forwarded = self.headers.get("X-Forwarded-For", "")
             if forwarded:
@@ -490,6 +528,37 @@ def make_handler(store: Store, smtp: Smtp, admin_token: str, limiter: RateLimite
                 payload = self._json()
             except (ValueError, json.JSONDecodeError):
                 self._send(400, {"error": "bad json"})
+                return
+            if path == "/api/v1/web-rename":
+                if self._too_fast("admin"):
+                    return
+                if not self._authorized_web_user():
+                    return
+                device_id = str(payload.get("id") or "").strip()
+                alias = str(payload.get("alias") or "")
+                if not device_id:
+                    self._send(400, {"error": "id required"})
+                    return
+                try:
+                    saved = store.set_alias(device_id, alias)
+                except ValueError as err:
+                    self._send(400, {"error": str(err)})
+                    return
+                if saved is None:
+                    self._send(404, {"error": "unknown device"})
+                    return
+                try:
+                    import subprocess
+                    subprocess.run(
+                        ["/usr/bin/python3", "/opt/sda-companion/sync_web_peers.py"],
+                        check=False,
+                        timeout=20,
+                        capture_output=True,
+                    )
+                except Exception:
+                    pass
+                shown = str((saved or {}).get("alias") or alias)
+                self._send(200, {"ok": True, "id": device_id, "alias": shown})
                 return
             if path == "/api/v1/clients":
                 if self._too_fast("admin"):
