@@ -19,6 +19,8 @@ GitHub Release assets, from the **Smart Desktop Access release** workflow (tag `
 
 See [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) for the file list and the iPhone sideload limits. Builds are unsigned. No paid signing account is required.
 
+A 32-bit Windows customer installer is also built: `SmartDesktopAccess-windows-x86.exe`. Flutter cannot target 32-bit Windows, so that build uses the older Sciter UI. It is the same incoming-only client (server address and key are built in, permanent password, companion registration, autostart service, Deactivate uninstalls itself), but the window is the legacy desktop UI with an approximate purple-and-blue theme. There is no 32-bit MSI and no 32-bit Admin app. GitHub Actions workflow **Smart Desktop Access Windows x86** produces it; the regular Windows and release workflows include it with the 64-bit client as well.
+
 ## Customer list and email
 
 hbbs does not have a device list. [`server/companion`](server/companion/README.md) is a small Python service for the same Ubuntu VM. The client registers itself. The admin app shows Connect, Disconnect, and Send email. Deploy steps are in that README. This repository does not install it on the server.
@@ -42,3 +44,5 @@ SDA_VARIANT=admin cargo build --features flutter
 ```
 
 Flutter packaging uses the same variable. `res/sda/apply_variant.py` renames the macOS bundle and the Windows version resource when `SDA_VARIANT=admin`. Android and iOS projects in the tree are already the admin app.
+
+The 32-bit Windows client is not a local Flutter build. GitHub Actions compiles it with `cargo build --features inline,vram,hwcodec` for `i686-pc-windows-msvc` and packs `sciter.dll` (the free 32-bit Sciter runtime) into `SmartDesktopAccess-windows-x86.exe`.

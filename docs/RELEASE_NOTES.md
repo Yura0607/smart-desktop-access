@@ -11,7 +11,8 @@ The ID and relay server is `smartdesktopaccess.duckdns.org`. Customers do not ty
 
 Stable names, so the install email can keep pointing at "latest":
 
-- `SmartDesktopAccess-windows-x64.exe` and `.msi` — customer, Windows
+- `SmartDesktopAccess-windows-x64.exe` and `.msi` — customer, 64-bit Windows
+- `SmartDesktopAccess-windows-x86.exe` — customer, 32-bit Windows (legacy Sciter UI; see below)
 - `SmartDesktopAccess-macos-arm64.dmg` — customer, Macs from about 2020
 - `SmartDesktopAccess-macos-x64.dmg` — customer, older Intel Macs
 - `SmartDesktopAccessAdmin-windows-x64.exe` — your Windows app
@@ -20,6 +21,16 @@ Stable names, so the install email can keep pointing at "latest":
 - `SmartDesktopAccessAdmin-ios-unsigned.zip` — your iPhone or iPad
 
 These files are not signed. Windows shows a warning; click More info, then Run anyway. On a Mac, if the system says the app cannot be opened, use Privacy & Security and click Open Anyway.
+
+### 32-bit Windows client
+
+Flutter does not support 32-bit Windows, so this installer uses the older Sciter interface instead of the Flutter window used on 64-bit Windows. The built-in server, incoming-only mode, permanent password, companion registration, service autostart, Deactivate (silent uninstall), and Smart Desktop Access name still come from the same Rust client. Differences:
+
+- The window is the legacy desktop UI. The purple-and-blue theme is approximate.
+- There is a portable `.exe` only, not an `.msi`.
+- Flutter-only screens (the newer home layout and related desktop polish) are not in this build.
+- Voice, video (camera), and chat still use the Rust core, through the Sciter connection manager rather than the Flutter one.
+- There is no 32-bit Admin app.
 
 ## iPhone and iPad
 
