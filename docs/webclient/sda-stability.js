@@ -1149,6 +1149,60 @@
     return "";
   }
 
+  // Double-key fix: Flutter's own keyboard handler (window keydown/keyup ->
+  // RawKeyboard -> setByName("input_key")) also forwards physical keys once its
+  // remote page has focus (e.g. after any click). Our capture listener below
+  // forwards them too, so every char arrived twice. We stay the single sender
+  // for the key events we forward and drop Flutter's copy of that same event.
+  var KEY_DEDUP_MS = 300;
+  var keyClaimAt = -1e9;
+  var ownKeySend = 0;
+  window.__sdaKeyStats = { own: 0, flutterPassed: 0, flutterDropped: 0 };
+  function keyNow() {
+    return (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+  }
+  function sendOwnKey(json) {
+    ownKeySend++;
+    try {
+      window.__sdaKeyStats.own++;
+      window.setByName("input_key", json);
+    } finally {
+      ownKeySend--;
+    }
+  }
+  function kbHostWillSend(ev) {
+    var k = ev && ev.key;
+    if (!k) return false;
+    if (k.length === 1 || k === "Enter") return true;
+    if (k === "Backspace") {
+      if (ev.type === "keyup") return true;
+      var ta = document.getElementById("sda-kb-host");
+      return !!(ta && (ta.value || "").length > 0);
+    }
+    return false;
+  }
+  // Decide, per physical key event, whether we are the one sending it.
+  function claimKeyEvent(ev) {
+    var mine = false;
+    try {
+      if (window.curConn) {
+        var ae = document.activeElement;
+        if (ae && ae.id === "sda-kb-host") mine = kbHostWillSend(ev);
+        else if (!isEditingHost()) mine = !!browserKeyName(ev) && typeof window.setByName === "function" && !window.setByName.__sdaStub;
+      }
+    } catch (e) {}
+    keyClaimAt = mine ? keyNow() : -1e9;
+  }
+  function isDuplicateFlutterKey(name) {
+    if (name !== "input_key" || ownKeySend > 0) return false;
+    if (keyNow() - keyClaimAt < KEY_DEDUP_MS) {
+      window.__sdaKeyStats.flutterDropped++;
+      return true;
+    }
+    window.__sdaKeyStats.flutterPassed++;
+    return false;
+  }
+
   function sendSessionKey(ev) {
     if (!window.curConn) return;
     if (isEditingHost()) return;
@@ -1158,7 +1212,7 @@
     var down = ev.type === "keydown";
     // Never preventDefault/stopPropagation on key events.
     try {
-      window.setByName("input_key", JSON.stringify({
+      sendOwnKey(JSON.stringify({
         name: name,
         down: down ? "true" : "false",
         press: "false",
@@ -1171,6 +1225,7 @@
   }
 
   document.addEventListener("keydown", function (ev) {
+    try { claimKeyEvent(ev); } catch (e0) {}
     try {
       if (!window.curConn) return;
       if (isEditingHost()) return;
@@ -1182,6 +1237,7 @@
     } catch (e) {}
   }, true);
   document.addEventListener("keyup", function (ev) {
+    try { claimKeyEvent(ev); } catch (e0) {}
     try { sendSessionKey(ev); } catch (e) {}
   }, true);
 
@@ -1193,7 +1249,7 @@
     var ov = kbLast;
     function send(name) {
       try {
-        window.setByName("input_key", JSON.stringify({
+        sendOwnKey(JSON.stringify({
           name: name, down: "false", press: "true",
           alt: "false", ctrl: "false", shift: "false", command: "false"
         }));
@@ -1205,7 +1261,7 @@
     } else if (nv.length > ov.length) {
       var content = nv.substring(ov.length);
       if (content.length > 1 && typeof window.curConn.inputString === "function") {
-        try { window.setByName("input_string", content); } catch (e2) {}
+        try { ownKeySend++; window.setByName("input_string", content); } catch (e2) {} finally { ownKeySend--; }
       } else {
         for (var j = 0; j < content.length; j++) {
           var ch = content.charAt(j);
@@ -1439,6 +1495,7 @@
     var orig = window.setByName;
     if (!orig || orig.__sdaStab) return;
     var wrapped = function (name, value) {
+      if (isDuplicateFlutterKey(name)) return;
       if (name === "connect") {
         markResume(value);
         sdaLog("connect", { id: value });
@@ -1459,6 +1516,7 @@
       }
     };
     if (orig.__sdaStub) wrapped.__sdaStub = true;
+    if (orig.__sdaStatus) wrapped.__sdaStatus = true;
     wrapped.__sdaStab = true;
     window.setByName = wrapped;
   }
