@@ -287,6 +287,7 @@ impl RendezvousMediator {
                 sleep(1.).await;
             }
         }
+        crate::companion_client::start();
         crate::hbbs_http::sync::start();
         #[cfg(target_os = "windows")]
         if crate::platform::is_installed() && crate::is_server() {

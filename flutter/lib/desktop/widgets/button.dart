@@ -48,25 +48,27 @@ class _ButtonState extends State<Button> {
               constraints: BoxConstraints(
                 minWidth: widget.minWidth ?? 70.0,
               ),
-              child: Container(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
                 padding: EdgeInsets.all(widget.padding ?? 4.5),
                 alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: pressed.value
-                      ? MyTheme.accent
-                      : (widget.isOutline
-                          ? Colors.transparent
-                          : MyTheme.button),
-                  border: Border.all(
-                    color: pressed.value
-                        ? MyTheme.accent
-                        : hover.value
-                            ? MyTheme.hoverBorder
-                            : (widget.isOutline
-                                ? widget.borderColor ?? MyTheme.border
-                                : MyTheme.button),
-                  ),
-                  borderRadius: BorderRadius.circular(widget.radius ?? 5),
+                decoration: MyTheme.buttonDecoration(
+                  filled: !widget.isOutline,
+                  outline: widget.isOutline,
+                  hovered: hover.value,
+                  pressed: pressed.value,
+                  disabled: false,
+                  light: Theme.of(context).brightness == Brightness.light,
+                  radius: widget.radius ?? 8,
+                ).copyWith(
+                  border: widget.isOutline
+                      ? Border.all(
+                          color: hover.value || pressed.value
+                              ? MyTheme.hoverBorder
+                              : (widget.borderColor ?? MyTheme.border),
+                        )
+                      : null,
                 ),
                 child: Text(
                   translate(
@@ -126,24 +128,28 @@ class _FixedWidthButtonState extends State<FixedWidthButton> {
           onTapCancel: () => pressed.value = false,
           onHover: (value) => hover.value = value,
           onTap: widget.onTap,
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
             width: widget.width,
             padding: EdgeInsets.all(widget.padding ?? 4.5),
             alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: pressed.value
-                  ? MyTheme.accent
-                  : (widget.isOutline ? Colors.transparent : MyTheme.button),
-              border: Border.all(
-                color: pressed.value
-                    ? MyTheme.accent
-                    : hover.value
-                        ? MyTheme.hoverBorder
-                        : (widget.isOutline
-                            ? widget.borderColor ?? MyTheme.border
-                            : MyTheme.button),
-              ),
-              borderRadius: BorderRadius.circular(widget.radius ?? 5),
+            decoration: MyTheme.buttonDecoration(
+              filled: !widget.isOutline,
+              outline: widget.isOutline,
+              hovered: hover.value,
+              pressed: pressed.value,
+              disabled: false,
+              light: Theme.of(context).brightness == Brightness.light,
+              radius: widget.radius ?? 8,
+            ).copyWith(
+              border: widget.isOutline
+                  ? Border.all(
+                      color: hover.value || pressed.value
+                          ? MyTheme.hoverBorder
+                          : (widget.borderColor ?? MyTheme.border),
+                    )
+                  : null,
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,

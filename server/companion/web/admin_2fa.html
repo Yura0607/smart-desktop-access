@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Smart Desktop Access Admin</title>
+  <style>
+    :root {
+      --blue: #2563eb;
+      --blue-deep: #1d4ed8;
+      --purple: #6d28d9;
+      --ink: #0f172a;
+      --muted: #475569;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(165deg, #312e81 0%, #1e3a8a 48%, #2563eb 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+    }
+    .card {
+      width: min(420px, 100%);
+      background: var(--card);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, .18);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.35rem;
+    }
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    label { display: block; font-weight: 600; }
+    input {
+      margin-top: 6px;
+      margin-bottom: 14px;
+      padding: 12px;
+      width: 100%;
+      font-size: 20px;
+      letter-spacing: 0.28em;
+      text-align: center;
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+    }
+    button {
+      appearance: none;
+      border: 0;
+      border-radius: 12px;
+      min-height: 44px;
+      width: 100%;
+      padding: 10px 14px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      background: linear-gradient(135deg, var(--purple), var(--blue));
+      cursor: pointer;
+    }
+    .err { color: #b91c1c; min-height: 1.2em; margin: 0 0 10px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Admin verification</h1>
+    <p>Enter the 6-digit code from your authenticator app to open the server console.</p>
+    <p class="err" id="err"></p>
+    <form id="f">
+      <label for="code">Authentication code</label>
+      <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required>
+      <button type="submit">Continue</button>
+    </form>
+  </div>
+  <script>
+    const form = document.getElementById("f");
+    const err = document.getElementById("err");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      err.textContent = "";
+      const base = location.pathname.replace(/\/+$/, "");
+      try {
+        const response = await fetch(base + "/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ code: document.getElementById("code").value })
+        });
+        if (!response.ok) {
+          err.textContent = response.status === 401 ? "That code was not accepted." : "Could not verify the code.";
+          return;
+        }
+        location.assign("/_admin/");
+      } catch (error) {
+        err.textContent = "Could not verify the code.";
+      }
+    });
+  </script>
+</body>
+</html>

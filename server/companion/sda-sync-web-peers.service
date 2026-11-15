@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync companion devices into the rustdesk-api web address book
+After=network.target rustdesk-api.service sda-companion.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/bash -c 'chgrp sda /opt/rustdesk-api/data /opt/rustdesk-api/data/rustdeskapi.db && chmod 770 /opt/rustdesk-api/data && chmod 660 /opt/rustdesk-api/data/rustdeskapi.db'
+ExecStart=/usr/bin/python3 /opt/sda-companion/sync_web_peers.py
+Nice=10

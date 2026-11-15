@@ -1,15 +1,15 @@
 html {
-    var(accent): #0071ff;
-    var(button): #2C8CFF;
+    var(accent): #7C3AED;
+    var(button): #3B5BFF;
     var(gray-bg): #eee;
     var(bg): white;
     var(border): #ccc;
-    var(hover-border): #999;
+    var(hover-border): #8B5CF6;
     var(text): #222;
     var(placeholder): #aaa;
     var(lighter-text): #888;
     var(light-text): #666;
-    var(menu-hover): #D7E4F2;
+    var(menu-hover): #EDE9FE;
     var(dark-red): #A72145;
     var(dark-yellow): #FBC732;
     var(dark-blue): #2E2459;

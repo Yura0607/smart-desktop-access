@@ -121,6 +121,7 @@ impl Drop for SimpleCallOnReturn {
 }
 
 pub fn global_init() -> bool {
+    crate::product::apply();
     #[cfg(all(target_os = "linux", feature = "drm"))]
     crate::platform::linux::dispatch_wayland_display_probe();
     #[cfg(target_os = "linux")]
@@ -1220,7 +1221,7 @@ pub fn is_rustdesk() -> bool {
 
 #[inline]
 pub fn get_uri_prefix() -> String {
-    format!("{}://", get_app_name().to_lowercase())
+    format!("{}://", crate::product::install_name().to_lowercase())
 }
 
 #[cfg(target_os = "macos")]
@@ -2286,15 +2287,25 @@ async fn secure_tcp_impl(conn: &mut Stream, key: &str, log_on_success: bool) -> 
     key_exchange(conn, key, log_on_success).await.map(|_| ())
 }
 
+/// OSS hbbs 1.1.16 never writes a KeyExchange. Waiting [`READ_TIMEOUT`] made
+/// `secure_tcp` fail with "deadline has elapsed" and the punch never started.
+/// A server that does speak sends the message immediately, so a short wait is
+/// enough; silence is the same as "sent nothing", which `secure_tcp` tolerates.
+const KEY_EXCHANGE_OFFER_WAIT_MS: u64 = 2_000;
+
 /// The server's key exchange on `conn`. `Ok(true)` once the stream is encrypted. `Ok(false)`
-/// when the server sent something else first, nothing parseable, or closed: `secure_tcp`
-/// tolerates that for servers from before the exchange, `secure_tcp_required` does not.
+/// when the server sent something else first, nothing parseable, closed, or stayed silent:
+/// `secure_tcp` tolerates that for servers from before the exchange, `secure_tcp_required` does not.
 async fn key_exchange(conn: &mut Stream, key: &str, log_on_success: bool) -> ResultType<bool> {
     let rs_pk = get_rs_pk(key);
     let Some(rs_pk) = rs_pk else {
         bail!("Handshake failed: invalid public key from rendezvous server");
     };
-    match timeout(READ_TIMEOUT, conn.next()).await? {
+    let next = match timeout(KEY_EXCHANGE_OFFER_WAIT_MS, conn.next()).await {
+        Ok(next) => next,
+        Err(_) => return Ok(false),
+    };
+    match next {
         Some(Ok(bytes)) => {
             if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
                 match msg_in.union {

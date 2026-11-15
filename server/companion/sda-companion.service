@@ -1,0 +1,20 @@
+[Unit]
+Description=Smart Desktop Access companion
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sda
+Group=sda
+WorkingDirectory=/opt/sda-companion
+EnvironmentFile=/etc/sda-companion.env
+ExecStart=/usr/bin/python3 /opt/sda-companion/companion.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Smart Desktop Access — view only</title>
+  <link rel="icon" href="favicon.ico">
+  <style>
+    body { font-family: sans-serif; margin: 24px; max-width: 42rem; color: #102033; }
+    button { font-size: 1rem; padding: 8px 14px; }
+    .note { background: #e8f2ff; border-radius: 12px; padding: 16px; }
+  </style>
+</head>
+<body>
+  <h1>View only</h1>
+  <div class="note">
+    <p>This page can only show a computer's screen. It cannot move the mouse or type. That control stays in Smart Desktop Access Admin.</p>
+    <p>The person at the computer must agree every time before the screen is shown.</p>
+  </div>
+  <p>
+    <label><input id="agree" type="checkbox"> I agree to show this computer's screen for this visit</label>
+  </p>
+  <button id="start" type="button" disabled>Show screen</button>
+  <p id="status"></p>
+  <script>
+    const agree = document.getElementById('agree');
+    const start = document.getElementById('start');
+    const status = document.getElementById('status');
+    agree.onchange = () => { start.disabled = !agree.checked; };
+    start.onclick = () => {
+      status.textContent = 'This page does not send mouse or keyboard input. The picture itself is not shown yet: the browser decoder lives in flutter/web/js, which is not part of this repository. Control stays in Smart Desktop Access Admin.';
+    };
+  </script>
+</body>
+</html>

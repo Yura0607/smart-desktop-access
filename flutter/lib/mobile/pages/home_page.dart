@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/common/sda/clients_page.dart';
+import 'package:flutter_hbb/common/sda/product.dart';
 import 'package:flutter_hbb/mobile/pages/server_page.dart';
 import 'package:flutter_hbb/mobile/pages/settings_page.dart';
 import 'package:flutter_hbb/web/settings_page.dart';
@@ -13,6 +15,20 @@ abstract class PageShape extends Widget {
   final String title = "";
   final Widget icon = Icon(null);
   final List<Widget> appBarActions = [];
+}
+
+class _SdaClientsTab extends StatelessWidget implements PageShape {
+  @override
+  final icon = const Icon(Icons.computer);
+
+  @override
+  final title = 'Computers';
+
+  @override
+  final List<Widget> appBarActions = const <Widget>[];
+
+  @override
+  Widget build(BuildContext context) => const SdaClientsPage();
 }
 
 class HomePage extends StatefulWidget {
@@ -47,6 +63,9 @@ class HomePageState extends State<HomePage> {
 
   void initPages() {
     _pages.clear();
+    if (bind.isOutgoingOnly()) {
+      _pages.add(_SdaClientsTab());
+    }
     if (!bind.isIncomingOnly()) {
       _pages.add(ConnectionPage(
         appBarActions: [],
@@ -150,7 +169,7 @@ class HomePageState extends State<HomePage> {
         ],
       );
     }
-    return Text(bind.mainGetAppNameSync());
+    return Text(productDisplayName());
   }
 }
 
@@ -166,7 +185,7 @@ class WebHomePage extends StatelessWidget {
       // backgroundColor: MyTheme.grayBg,
       appBar: AppBar(
         centerTitle: true,
-        title: Text("${bind.mainGetAppNameSync()} (Preview)"),
+        title: Text("${productDisplayName()} (Preview)"),
         actions: connectionPage.appBarActions,
       ),
       body: connectionPage,

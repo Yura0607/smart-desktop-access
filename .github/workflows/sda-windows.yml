@@ -1,0 +1,38 @@
+name: Smart Desktop Access Windows
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [master]
+
+# Installers are workflow artifacts only. This does not publish a GitHub
+# Release, so it does not move the stable "latest" release.
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  client:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: windows-preview
+      publish-update-metadata: false
+      variant: client
+      product-build: true
+      windows-only: true
+      publish-release: false
+
+  admin:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: windows-preview
+      publish-update-metadata: false
+      variant: admin
+      product-build: true
+      windows-only: true
+      publish-release: false

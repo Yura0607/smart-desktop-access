@@ -237,6 +237,12 @@ pub(super) fn launch_elevated(
         bail!("Elevated command is too long: {parameter_chars} UTF-16 characters");
     }
     let _com = initialize_shell_com()?;
+    // runas consent is easy to lose when the window is fully hidden or the
+    // caller is a background thread. Ask to come to the foreground and keep a
+    // minimized window so Windows still shows the permission prompt.
+    unsafe {
+        let _ = WindowsAndMessaging::AllowSetForegroundWindow(WindowsAndMessaging::ASFW_ANY);
+    }
     let verb = wide_string("runas");
     let working_directory = wide_string(path_for_cmd_environment(elevated_working_directory(
         executable,
@@ -246,6 +252,7 @@ pub(super) fn launch_elevated(
     let mut info = Shell::SHELLEXECUTEINFOW::default();
     info.cbSize = mem::size_of::<Shell::SHELLEXECUTEINFOW>() as u32;
     info.fMask = Shell::SEE_MASK_NOCLOSEPROCESS | Shell::SEE_MASK_NOASYNC;
+    info.hwnd = unsafe { WindowsAndMessaging::GetForegroundWindow() };
     info.lpVerb = PCWSTR(verb.as_ptr());
     info.lpFile = PCWSTR(executable.as_ptr());
     info.lpParameters = PCWSTR(parameters.as_ptr());
@@ -253,7 +260,7 @@ pub(super) fn launch_elevated(
     info.nShow = if show {
         WindowsAndMessaging::SW_SHOWNORMAL.0
     } else {
-        WindowsAndMessaging::SW_HIDE.0
+        WindowsAndMessaging::SW_SHOWMINNOACTIVE.0
     };
     unsafe { Shell::ShellExecuteExW(&mut info) }?;
     if info.hProcess.0.is_null() {

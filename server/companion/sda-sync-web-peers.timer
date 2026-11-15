@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync companion devices into the web client address book every 2 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

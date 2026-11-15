@@ -1581,11 +1581,11 @@ impl Client {
         let res = Self::secure_connection(peer_id, signed_id_pk.clone(), key, &mut conn).await;
         let pk: Option<Vec<u8>> = match res {
             Ok(pk) => pk,
-            Err(e) if typ == "WebRTC" && !relay_server.is_empty() => {
-                // WebRTC won the race but identity/DTLS binding failed; fall back to a freshly
-                // coordinated relay instead of failing the whole attempt. The guard is dropped
-                // first so the bad pc is closed promptly.
-                log::warn!("WebRTC secure handshake failed ({}), falling back to relay", e);
+            Err(e) if typ != "Relay" && !relay_server.is_empty() => {
+                // A direct or LAN socket can connect and then never finish the
+                // handshake (NAT hairpin to the same public address). Ask the
+                // relay instead of failing the session.
+                log::warn!("{typ} secure handshake failed ({e}), falling back to relay");
                 drop(webrtc_guard.take());
                 match Self::request_relay(
                     peer_id,
@@ -1618,9 +1618,7 @@ impl Client {
                     Err(relay_e) => {
                         interface.update_direct(Some(direct));
                         bail!(
-                            "WebRTC secure failed ({}); relay fallback also failed: {}",
-                            e,
-                            relay_e
+                            "{typ} secure failed ({e}); relay fallback also failed: {relay_e}"
                         );
                     }
                 }

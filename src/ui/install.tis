@@ -16,6 +16,10 @@ class Install: Reactor.Component {
             </div>
             <div><button|checkbox #startmenu {startmenu_shortcuts}>{translate('Create start menu shortcuts')}</button></div>
             <div><button|checkbox #desktopicon {desktop_icon}>{translate('Create desktop icon')}</button></div>
+            <div style="margin-top: 1.5em; font-weight: bold;">Name this computer</div>
+            <div><input|text #client_name novalue="Computer name" style="width: 24em;" /></div>
+            <div style="margin-top: 0.8em; font-weight: bold;">Your email address</div>
+            <div><input|text #client_email novalue="name@example.com" style="width: 24em;" /></div>
             <div #agreement .link style="margin-top: 2em;">{translate('End-user license agreement')}</div>
             <div>{translate('agreement_tip')}</div>
             <div style="height: 1px; background: gray; margin-top: 1em" />
@@ -50,7 +54,8 @@ class Install: Reactor.Component {
     }
 
     event click $(#agreement) {
-        view.open_url("http://rustdesk.com/privacy");
+        var url = handler.get_builtin_option("source-url");
+        view.open_url(url ? url : "https://github.com/Yura0607/smart-desktop-access");
     }
 
     event click $(#submit) {
@@ -63,6 +68,10 @@ class Install: Reactor.Component {
         if ($(#desktopicon).value) {
             args += "desktopicon ";
         }
+        var nameEl = $(#client_name);
+        var emailEl = $(#client_email);
+        if (nameEl) handler.set_option("sda-client-name", (nameEl.value || "").trim());
+        if (emailEl) handler.set_option("sda-email", (emailEl.value || "").trim());
         view.install_me(args, install_path);
     }
 }

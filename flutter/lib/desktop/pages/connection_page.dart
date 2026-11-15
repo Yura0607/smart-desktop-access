@@ -15,6 +15,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 
 import '../../common.dart';
+import '../../common/sda/product.dart';
 import '../../common/formatter/id_formatter.dart';
 import '../../common/widgets/peer_tab_page.dart';
 import '../../common/widgets/autocomplete.dart';
@@ -41,7 +42,10 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
   double? get height => bind.isIncomingOnly() ? null : em * 3;
 
   void onUsePublicServerGuide() {
-    const url = "https://rustdesk.com/pricing";
+    if (bind.isCustomClient()) {
+      return;
+    }
+    final url = sdaSourceUrl();
     canLaunchUrlString(url).then((can) {
       if (can) {
         launchUrlString(url);
@@ -133,7 +137,7 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
             if (!isIncomingOnly) startServiceWidget(),
             // ready && public
             // No need to show the guide if is custom client.
-            if (!isIncomingOnly) setupServerWidget(),
+            if (!isIncomingOnly && !bind.isCustomClient()) setupServerWidget(),
           ],
         );
 
