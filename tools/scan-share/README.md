@@ -48,9 +48,10 @@ Set-ExecutionPolicy -Scope Process Bypass -Force   # this window only
 
 The server installer:
 - writes `config.json`;
-- adds the URL ACL `http://+:8765/` for the signed-in user;
+- adds the URL ACL `http://+:8765/` for SYSTEM and Administrators;
 - adds the firewall rule **SDA Scan Server (TCP 8765)** (Inbound, Private, LocalSubnet);
-- registers and starts the scheduled task **SDA Scan Server**. It runs at the user's logon, hidden, and restarts every minute after a failure.
+- registers and starts the scheduled task **SDA Scan Server**: it runs **at Windows startup as SYSTEM** (no one needs to sign in), waits 60 s (`-StartupDelay`), restarts every minute after a failure, and a 5-minute watchdog trigger relaunches it if it ever stops (a mutex keeps a single instance).
+- Fallback: `-Mode Logon -User <name>` runs the task at that user's logon instead (someone must then be signed in to scan).
 
 **Client PC (DR1), in a normal PowerShell:**
 
@@ -75,5 +76,6 @@ These remove the task, firewall rule, URL ACL, shortcut and the `C:\ProgramData\
 
 ## Notes
 
-- Why a scheduled task at logon and not a service: WIA scanning works reliably in an interactive user session. The server therefore runs as the signed-in user, without admin rights.
-- If DR2 restarts, the server starts again when someone signs in.
+- Boot without logon: the server runs as SYSTEM in session 0; WIA scanning works there (tested with the Windows eSCL/WIA driver of the MFC-L2760DW).
+- At startup the server waits up to 300 s for the scanner (`-WaitScannerSeconds`). After a reboot the Brother scan interface sometimes comes up without its WIA driver bound; if no scanner is visible after 45 s, the server runs `pnputil /scan-devices` once to rebind it.
+- Services the setup relies on (all Automatic): Spooler, stisvc (Windows Image Acquisition), LanmanServer/LanmanWorkstation, SmartDesktopAccess.

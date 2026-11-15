@@ -3,10 +3,15 @@
 # Endpoints (header X-SDA-Token required):
 #   GET /status
 #   GET /scan?format=pdf|jpg&dpi=150|200|300&color=1|0&source=flatbed|adf
-param([string]$ConfigPath = (Join-Path $env:ProgramData 'SDA-Scan\config.json'))
+# Normally started at boot by the scheduled task "SDA Scan Server" as SYSTEM (no logon needed).
+param(
+    [string]$ConfigPath = (Join-Path $env:ProgramData 'SDA-Scan\config.json'),
+    [int]$StartupDelay = 0,          # seconds to wait before starting (boot: let USB/WIA/network settle)
+    [int]$WaitScannerSeconds = 300   # wait up to this long for the WIA scanner to appear (server starts anyway)
+)
 
 $ErrorActionPreference = 'Stop'
-$Version = '1.0.0'
+$Version = '1.1.1'
 $Base = Split-Path -Parent $ConfigPath
 $LogFile = Join-Path $Base 'scan.log'
 
@@ -19,7 +24,29 @@ function Write-Log([string]$Message) {
     } catch {}
 }
 
-$cfg = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json
+# ---- single instance (boot task and a manual start must not fight over the port)
+$mutex = $null
+try {
+    $created = $false
+    $mutex = New-Object Threading.Mutex($false, 'Global\SDA-ScanServer', [ref]$created)
+    if (-not $mutex.WaitOne(0)) { Write-Log "Another server instance is already running; exiting (pid $PID)."; exit 0 }
+} catch [Threading.AbandonedMutexException] {
+    # previous instance died without releasing; we own it now
+} catch {
+    Write-Log ("Another server instance is already running (" + $_.Exception.Message + "); exiting (pid $PID).")
+    exit 0
+}
+
+$sess = (Get-Process -Id $PID).SessionId
+Write-Log ("Process started as $env:USERDOMAIN\$env:USERNAME (pid $PID, session $sess), startup delay ${StartupDelay}s")
+if ($StartupDelay -gt 0) { Start-Sleep -Seconds $StartupDelay }
+
+$cfg = $null
+for ($i = 0; $i -lt 30 -and -not $cfg; $i++) {
+    try { $cfg = Get-Content -Path $ConfigPath -Raw | ConvertFrom-Json }
+    catch { if ($i -eq 0) { Write-Log ('waiting for config: ' + $_.Exception.Message) }; Start-Sleep -Seconds 2 }
+}
+if (-not $cfg) { Write-Log "FATAL: cannot read $ConfigPath"; exit 3 }
 $Port = 8765
 if ($cfg.Port) { $Port = [int]$cfg.Port }
 $Token = [string]$cfg.Token
@@ -54,10 +81,18 @@ function Test-LocalAddr([Net.IPAddress]$ip) {
     if ($ip.IsIPv4MappedToIPv6) { $ip = $ip.MapToIPv4() }
     if ([Net.IPAddress]::IsLoopback($ip)) { return $true }
     if ($ip.IsIPv6LinkLocal) { return $true }
-    if (((Get-Date) - $script:LocalNetsTime).TotalMinutes -gt 5) { $script:LocalNets = Get-LocalNets; $script:LocalNetsTime = Get-Date }
+    $age = ((Get-Date) - $script:LocalNetsTime).TotalSeconds
+    if ($age -gt 300 -or ($script:LocalNets.Count -eq 0 -and $age -gt 5)) { $script:LocalNets = @(Get-LocalNets); $script:LocalNetsTime = Get-Date }
     $b = $ip.GetAddressBytes()
     foreach ($n in $script:LocalNets) {
         if ($n.Prefix -gt 0 -and (Test-SamePrefix $b $n.Bytes $n.Prefix)) { return $true }
+    }
+    # addresses may have changed (e.g. DHCP finished after boot): refresh once and re-check
+    if ($age -gt 10) {
+        $script:LocalNets = @(Get-LocalNets); $script:LocalNetsTime = Get-Date
+        foreach ($n in $script:LocalNets) {
+            if ($n.Prefix -gt 0 -and (Test-SamePrefix $b $n.Bytes $n.Prefix)) { return $true }
+        }
     }
     return $false
 }
@@ -83,9 +118,16 @@ function Send-Text($ctx, [int]$code, [string]$text, [string]$ctype = 'text/plain
 function Get-ScannerName {
     try {
         $dm = New-Object -ComObject WIA.DeviceManager
+        # Type 1 = scanner (Brother WIA driver). The Windows eSCL/IPP-over-USB driver (SWD\EsclUsb) reports
+        # other type values (e.g. 65535), so accept anything that is not a camera (2) or video device (3).
+        $first = $null
         foreach ($d in $dm.DeviceInfos) {
-            if ($d.Type -eq 1) { return [string]$d.Properties.Item('Name').Value }
+            if ($d.Type -eq 2 -or $d.Type -eq 3) { continue }
+            $n = [string]$d.Properties.Item('Name').Value
+            if ($d.Type -eq 1 -or $n -match 'Brother') { return $n }
+            if (-not $first) { $first = $n }
         }
+        if ($first) { return $first }
     } catch {}
     return $null
 }
@@ -170,26 +212,58 @@ $ScanScript = {
         $dm = New-Object -ComObject WIA.DeviceManager
         $info = $null
         foreach ($d in $dm.DeviceInfos) {
-            if ($d.Type -eq 1) {
-                if (-not $info) { $info = $d }
-                if ([string]$d.Properties.Item('Name').Value -match 'Brother') { $info = $d; break }
-            }
+            if ($d.Type -eq 2 -or $d.Type -eq 3) { continue }   # cameras / video
+            if (-not $info) { $info = $d }
+            if ([string]$d.Properties.Item('Name').Value -match 'Brother') { $info = $d; break }
         }
         if (-not $info) { Log 'scan: no WIA scanner found'; ReplyText 503 'NOSCANNER: no WIA scanner found on the server PC'; return }
         $name = [string]$info.Properties.Item('Name').Value
         $dev = $info.Connect()
         $adf = ($opt.Source -eq 'adf')
-        if ($adf) {
+        # WIA 2.0 drivers (e.g. Windows eSCL/IPP-USB) expose "Flatbed" / "Feeder" child items;
+        # older WIA 1 drivers use one item plus the document-handling property 3088.
+        $pick = $null; $itemNames = @()
+        for ($k = 1; $k -le $dev.Items.Count; $k++) {
+            $it = $dev.Items.Item($k)
+            $nm = ''; try { $nm = [string]$it.Properties.Item('Item Name').Value } catch {}
+            $itemNames += $nm
+            if (-not $pick) {
+                if ($adf -and $nm -match 'Feeder|ADF|Document') { $pick = $it }
+                if (-not $adf -and $nm -match 'Flatbed|Platen|Glass') { $pick = $it }
+            }
+        }
+        Log ("scan: device '" + $name + "' items: " + ($itemNames -join ', '))
+        if ($pick) {
+            $item = $pick
+        } elseif ($adf) {
             if (-not (Set-Prop $dev.Properties 3088 1)) { ReplyText 422 'NOADF: scanner has no document feeder'; return }
             [void](Set-Prop $dev.Properties 3096 1)
+            $item = $dev.Items.Item(1)
         } else {
             try { [void](Set-Prop $dev.Properties 3088 2) } catch {}
+            $item = $dev.Items.Item(1)
         }
-        $item = $dev.Items.Item(1)
         $intent = 2; if ($opt.Color) { $intent = 1 }
         try { [void](Set-Prop $item.Properties 6146 $intent) } catch { Log ('intent: ' + $_.Exception.Message) }
-        [void](Set-Prop $item.Properties 6147 $opt.Dpi)
-        [void](Set-Prop $item.Properties 6148 $opt.Dpi)
+        # resolution: use the requested DPI, or the nearest one the driver supports
+        $useDpi = $opt.Dpi
+        foreach ($pid_ in 6147, 6148) {
+            $p = Get-Prop $item.Properties $pid_
+            if (-not $p) { continue }
+            try { $p.Value = $opt.Dpi } catch {
+                $cands = @()
+                try {
+                    if ($p.SubType -eq 2) { foreach ($v in $p.SubTypeValues) { $cands += [int]$v } }
+                    elseif ($p.SubType -eq 1) { $cands += [Math]::Min([Math]::Max($opt.Dpi, [int]$p.SubTypeMin), [int]$p.SubTypeMax) }
+                } catch {}
+                if ($cands.Count -gt 0) {
+                    $best = $cands | Sort-Object { [Math]::Abs($_ - $opt.Dpi) } | Select-Object -First 1
+                    $p.Value = $best
+                    Log ("dpi {0} not supported by the driver, using {1}" -f $opt.Dpi, $best)
+                } else { Log ('dpi: ' + $_.Exception.Message) }
+            }
+            try { if ($pid_ -eq 6147) { $useDpi = [int]$p.Value } } catch {}
+        }
         try { [void](Set-Prop $item.Properties 6149 0); [void](Set-Prop $item.Properties 6150 0) } catch {}
         try {
             $wx = Get-Prop $item.Properties 6151; $hy = Get-Prop $item.Properties 6152
@@ -216,7 +290,7 @@ $ScanScript = {
                 throw
             }
             $raw = [byte[]]$img.FileData.BinaryData
-            [void]$pages.Add((To-Jpeg $raw $opt.Dpi))
+            [void]$pages.Add((To-Jpeg $raw $useDpi))
         }
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         if ($opt.Format -eq 'pdf') {
@@ -239,7 +313,7 @@ $ScanScript = {
             Reply 200 'application/zip' $zb "scan-$stamp.zip"
             $size = $zb.Length; $kind = 'zip'
         }
-        Log ('scan OK: {0} pages={1} {2}x{3} dpi={4} color={5} src={6} -> {7} {8} bytes in {9:N1}s' -f $name, $pages.Count, $pages[0].W, $pages[0].H, $opt.Dpi, $opt.Color, $opt.Source, $kind, $size, ((Get-Date) - $t0).TotalSeconds)
+        Log ('scan OK: {0} pages={1} {2}x{3} dpi={4} color={5} src={6} -> {7} {8} bytes in {9:N1}s' -f $name, $pages.Count, $pages[0].W, $pages[0].H, $useDpi, $opt.Color, $opt.Source, $kind, $size, ((Get-Date) - $t0).TotalSeconds)
     } catch {
         $msg = $_.Exception.Message
         Log ('scan FAILED: ' + $msg)
@@ -275,7 +349,23 @@ function Clear-Job {
 # ---- main loop -----------------------------------------------------------
 $job = $null
 $ScannerName = Get-ScannerName
-Write-Log ("Server $Version starting on port $Port as $env:USERDOMAIN\$env:USERNAME, scanner: " + $ScannerName)
+$waitUntil = (Get-Date).AddSeconds($WaitScannerSeconds)
+if (-not $ScannerName) { Write-Log "No WIA scanner yet; waiting up to ${WaitScannerSeconds}s for it to appear" }
+$rescanAt = (Get-Date).AddSeconds(45); $rescanned = $false
+while (-not $ScannerName -and (Get-Date) -lt $waitUntil) {
+    Start-Sleep -Seconds 5
+    $ScannerName = Get-ScannerName
+    if (-not $ScannerName -and -not $rescanned -and (Get-Date) -gt $rescanAt) {
+        # after a reboot the Brother scan interface sometimes comes up without its WIA driver bound;
+        # a PnP re-scan (needs admin/SYSTEM) rebinds it
+        $rescanned = $true
+        try { $o = & pnputil.exe /scan-devices 2>&1 | Out-String; Write-Log ('No scanner after 45s; ran pnputil /scan-devices: ' + ($o -replace '\s+', ' ').Trim()) }
+        catch { Write-Log ('pnputil /scan-devices failed: ' + $_.Exception.Message) }
+    }
+}
+if (-not $ScannerName) { Write-Log 'Still no WIA scanner; starting anyway (/status and /scan re-check it on every request)' }
+$LocalNets = @(Get-LocalNets); $LocalNetsTime = Get-Date
+Write-Log ("Server $Version starting on port $Port as $env:USERDOMAIN\$env:USERNAME (session $sess), scanner: " + $ScannerName)
 while ($true) {
     $listener = $null
     try {
