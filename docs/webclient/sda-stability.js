@@ -1171,16 +1171,13 @@
       ownKeySend--;
     }
   }
+  // In the iPad keyboard box we send text, Enter and Backspace ourselves
+  // (at keydown, see handleKbHostKeydown); arrows/F-keys stay with Flutter.
   function kbHostWillSend(ev) {
     var k = ev && ev.key;
     if (!k) return false;
-    if (k.length === 1 || k === "Enter") return true;
-    if (k === "Backspace") {
-      if (ev.type === "keyup") return true;
-      var ta = document.getElementById("sda-kb-host");
-      return !!(ta && (ta.value || "").length > 0);
-    }
-    return false;
+    if (ev.isComposing || ev.keyCode === 229) return false;
+    return k.length === 1 || k === "Enter" || k === "Backspace";
   }
   // Decide, per physical key event, whether we are the one sending it.
   function claimKeyEvent(ev) {
@@ -1245,6 +1242,35 @@
     return false;
   }
 
+  // iPad double-letter fix: on iPad the web client runs in "mobile" mode,
+  // where js/common.ts mapKey() turns every single character that is not
+  // a-z (capitals, digits, punctuation, Cyrillic...) into a KeyEvent.unicode.
+  // The remote (legacy keyboard mode) types a unicode char on EVERY event,
+  // down and up alike, so a down+up pair typed it twice. Such chars must be
+  // sent once, as a press. a-z map to chr, which honours down/up.
+  function keyMapIsMobile() {
+    try { return typeof window.isMobile === "function" && !!window.isMobile(); } catch (e) { return false; }
+  }
+  function charKeyInfo(ch, ev) {
+    var name = ch;
+    // Hotkeys (Ctrl/Alt/Cmd + letter) go as plain a-z so they stay real key chords.
+    if (ev && (ev.ctrlKey || ev.altKey || ev.metaKey) && /^[A-Za-z]$/.test(ch)) name = ch.toLowerCase();
+    return { name: name, unicode: keyMapIsMobile() && !/^[a-z]$/.test(name) };
+  }
+  window.__sdaKeyPress = { press: 0, skippedUp: 0, kbKeydown: 0, kbInputSkipped: 0 };
+  function sendPressKey(name, ev, keepShift) {
+    window.__sdaKeyPress.press++;
+    sendOwnKey(JSON.stringify({
+      name: name,
+      down: "false",
+      press: "true",
+      alt: ev && ev.altKey ? "true" : "false",
+      ctrl: ev && ev.ctrlKey ? "true" : "false",
+      shift: keepShift && ev && ev.shiftKey ? "true" : "false",
+      command: ev && ev.metaKey ? "true" : "false"
+    }));
+  }
+
   function sendSessionKey(ev) {
     if (!window.curConn) return;
     if (isEditingHost()) return;
@@ -1252,6 +1278,15 @@
     if (!name) return;
     if (typeof window.setByName !== "function" || window.setByName.__sdaStub) return;
     var down = ev.type === "keydown";
+    if (name.length === 1) {
+      var info = charKeyInfo(name, ev);
+      name = info.name;
+      if (info.unicode) {
+        if (down) { try { sendPressKey(name, ev, false); } catch (e1) {} }
+        else window.__sdaKeyPress.skippedUp++;
+        return;
+      }
+    }
     // Never preventDefault/stopPropagation on key events.
     try {
       sendOwnKey(JSON.stringify({
@@ -1266,10 +1301,32 @@
     } catch (e) {}
   }
 
+  // iPad keyboard box (#sda-kb-host). Flutter's RawKeyboard listener calls
+  // preventDefault() on hardware keydowns, so the textarea never got an
+  // input event and Magic-keyboard letters were lost; on-screen keys that do
+  // reach the textarea must not be sent a second time. So: send the key
+  // here, once, and skip the matching textarea input that may follow.
+  var kbPending = null;
+  function handleKbHostKeydown(ev) {
+    kbPending = null;
+    if (!window.curConn || typeof window.setByName !== "function" || window.setByName.__sdaStub) return;
+    if (!kbHostWillSend(ev)) return;
+    var k = ev.key;
+    window.__sdaKeyPress.kbKeydown++;
+    if (k === "Enter") { sendPressKey("VK_RETURN", ev, true); kbPending = { kind: "enter", t: keyNow() }; return; }
+    if (k === "Backspace") { sendPressKey("VK_BACK", ev, true); kbPending = { kind: "back", t: keyNow() }; return; }
+    if (k === " ") { sendPressKey("VK_SPACE", ev, true); kbPending = { kind: "text", t: keyNow() }; return; }
+    var info = charKeyInfo(k, ev);
+    sendPressKey(info.name, ev, !info.unicode && (ev.ctrlKey || ev.altKey || ev.metaKey));
+    kbPending = { kind: "text", t: keyNow() };
+  }
+
   document.addEventListener("keydown", function (ev) {
     try { claimKeyEvent(ev); } catch (e0) {}
     try {
       if (!window.curConn) return;
+      var kae = document.activeElement;
+      if (kae && kae.id === "sda-kb-host") { handleKbHostKeydown(ev); return; }
       if (isEditingHost()) return;
       var ae = document.activeElement;
       if (!ae || ae.id === "sda-live-canvas" || ae === overlay || ae === overlayWrap || ae === document.body || ae === document.documentElement) {
@@ -1284,11 +1341,27 @@
   }, true);
 
   var kbLast = "";
-  function handleKbHostInput() {
+  function handleKbHostInput(ev) {
     var ta = document.getElementById("sda-kb-host");
     if (!ta || !window.curConn || typeof window.setByName !== "function" || window.setByName.__sdaStub) return;
+    // Mid-composition (accents, CJK, dictation): wait for compositionend.
+    if (ev && ev.isComposing) return;
     var nv = ta.value || "";
     var ov = kbLast;
+    var pend = kbPending;
+    if (pend && keyNow() - pend.t < 1000) {
+      var added = nv.length > ov.length ? nv.substring(ov.length) : "";
+      var match = (pend.kind === "back" && nv.length < ov.length)
+        || (pend.kind === "enter" && added === "\n")
+        || (pend.kind === "text" && added.length === 1 && added !== "\n");
+      if (match) {
+        kbPending = null;
+        window.__sdaKeyPress.kbInputSkipped++;
+        kbLast = nv.length > 200 ? "" : nv;
+        if (nv.length > 200) ta.value = "";
+        return;
+      }
+    }
     function send(name) {
       try {
         sendOwnKey(JSON.stringify({
@@ -1334,6 +1407,7 @@
     ta.setAttribute("aria-label", "Remote keyboard");
     ta.style.cssText = "position:fixed;left:0;bottom:0;width:100%;height:1px;opacity:0;border:0;padding:0;margin:0;font-size:16px;z-index:2147483090;background:transparent;resize:none;outline:none;";
     ta.addEventListener("input", handleKbHostInput);
+    ta.addEventListener("compositionend", function () { setTimeout(function () { handleKbHostInput(null); }, 0); });
     document.body.appendChild(ta);
     return ta;
   }
