@@ -293,6 +293,20 @@
   var scrollAcc = 0;
   var TOUCH_KEY = "sda-touch-mode";
   var MAX_SCALE = 4;
+  // View modes for the iPad live view (SDA Controls menu): "fit" keeps the
+  // whole remote screen visible, "original" shows it 1:1 (one remote pixel =
+  // one CSS pixel, pan with two fingers), "stretch" fills the screen. The
+  // "window" view shrinks the picture into a smaller centred box. Touch and
+  // mouse mapping always use the canvas' real on-screen rect, so they stay
+  // exact in every mode, zoom level and orientation.
+  var VIEW_MODE_KEY = "sda-view-mode";
+  var viewMode = "fit";
+  try {
+    var vmSaved = localStorage.getItem(VIEW_MODE_KEY);
+    if (vmSaved === "original" || vmSaved === "stretch") viewMode = vmSaved;
+  } catch (eVm) {}
+  var windowView = false;
+  var WINDOW_FRAC = 0.72;
   var LONG_MS = 550;
   var SLOP = 12;
 
@@ -332,14 +346,30 @@
     return { scale: viewScale, panX: viewPanX, panY: viewPanY, frameW: frameW, frameH: frameH, touch: !!touchModeOn };
   };
 
-  function containRect(imgW, imgH) {
+  function imageBox() {
     var v = viewSize();
+    if (!windowView) return v;
+    var w = Math.round(v.w * WINDOW_FRAC);
+    var h = Math.round(v.h * WINDOW_FRAC);
+    return { x: v.x + Math.round((v.w - w) / 2), y: v.y + Math.round((v.h - h) / 2), w: w, h: h, inset: true };
+  }
+
+  function containRect(imgW, imgH) {
+    var v = imageBox();
     if (!imgW || !imgH) return null;
     var scale = Math.min(v.w / imgW, v.h / imgH);
     if (!(scale > 0) || !isFinite(scale)) scale = 1;
     var dw = imgW * scale;
     var dh = imgH * scale;
+    if (viewMode === "original") {
+      scale = 1;
+      dw = imgW;
+      dh = imgH;
+    } else if (viewMode === "stretch") {
+      return { left: v.x, top: v.y, width: v.w, height: v.h, scale: scale, imgW: imgW, imgH: imgH, view: v, mode: viewMode };
+    }
     return {
+      mode: viewMode,
       left: v.x + (v.w - dw) / 2,
       top: v.y + (v.h - dh) / 2,
       width: dw,
@@ -362,9 +392,11 @@
     if (!r) return;
     if (viewScale <= 1.001) {
       viewScale = 1;
-      viewPanX = 0;
-      viewPanY = 0;
-      return;
+      if (r.width <= r.view.w + 0.5 && r.height <= r.view.h + 0.5) {
+        viewPanX = 0;
+        viewPanY = 0;
+        return;
+      }
     }
     var dw = r.width * viewScale;
     var dh = r.height * viewScale;
@@ -392,6 +424,36 @@
   }
   window.sdaResetZoom = resetZoom;
 
+  function setViewMode(mode) {
+    if (mode !== "fit" && mode !== "original" && mode !== "stretch") return;
+    viewMode = mode;
+    try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (e) {}
+    resetZoom();
+    sdaLog("viewmode", { why: mode });
+  }
+  function setWindowView(on) {
+    windowView = !!on;
+    resetZoom();
+  }
+  function zoomBy(f) {
+    var r = containRect(frameW, frameH);
+    if (!r) return;
+    if (f < 1 && viewScale <= 1.001) {
+      if (viewMode !== "fit") setViewMode("fit");
+      return;
+    }
+    var b = r.view;
+    applyZoomAt(b.x + b.w / 2, b.y + b.h / 2, viewScale * f);
+    positionOverlay();
+    updateSessionTools();
+  }
+  window.sdaSetViewMode = setViewMode;
+  window.sdaSetWindowView = setWindowView;
+  window.sdaZoomBy = zoomBy;
+  window.sdaGetViewState = function () {
+    return { mode: viewMode, scale: viewScale, windowView: windowView, live: !!(overlay && overlay.style.display !== "none" && frameW) };
+  };
+
   function applyZoomAt(cx, cy, newScale) {
     var r = containRect(frameW, frameH);
     if (!r) return;
@@ -405,18 +467,33 @@
     clampPan();
   }
 
+  function baseOverflows() {
+    var r = containRect(frameW, frameH);
+    return !!(r && (r.width > r.view.w + 0.5 || r.height > r.view.h + 0.5));
+  }
+
   function positionOverlay() {
     if (!overlay || !frameW || !frameH) return;
     if (overlay.style.display === "none") return;
     var r = containRect(frameW, frameH);
     if (!r) return;
     clampPan();
-    overlay.style.left = (r.left + viewPanX) + "px";
-    overlay.style.top = (r.top + viewPanY) + "px";
-    overlay.style.width = (r.width * viewScale) + "px";
-    overlay.style.height = (r.height * viewScale) + "px";
+    var oL = r.left + viewPanX, oT = r.top + viewPanY;
+    var oW = r.width * viewScale, oH = r.height * viewScale;
+    overlay.style.left = oL + "px";
+    overlay.style.top = oT + "px";
+    overlay.style.width = oW + "px";
+    overlay.style.height = oH + "px";
+    // Clip the picture to the view box (matters in window view); clipped
+    // parts take no taps either.
+    var b = r.view;
+    var cT = Math.max(0, b.y - oT), cL = Math.max(0, b.x - oL);
+    var cB = Math.max(0, (oT + oH) - (b.y + b.h)), cR = Math.max(0, (oL + oW) - (b.x + b.w));
+    var clip = (cT || cL || cB || cR) ? ("inset(" + cT + "px " + cR + "px " + cB + "px " + cL + "px)") : "";
+    if (overlay.style.clipPath !== clip) { overlay.style.clipPath = clip; overlay.style.webkitClipPath = clip; }
+    overlay.style.outline = windowView ? "2px solid #7c3aed" : "";
     if (overlayWrap) {
-      var v = r.view;
+      var v = viewSize();
       overlayWrap.style.left = v.x + "px";
       overlayWrap.style.top = v.y + "px";
       overlayWrap.style.width = v.w + "px";
@@ -745,7 +822,7 @@
       pinch.cy = cy;
       return;
     }
-    if (newScale > 1.001 || viewScale > 1.001 || grew) {
+    if (newScale > 1.001 || viewScale > 1.001 || grew || baseOverflows()) {
       applyZoomAt(cx, cy, newScale);
       viewPanX += cx - pinch.cx;
       viewPanY += cy - pinch.cy;
@@ -999,6 +1076,7 @@
     viewScale = 1;
     viewPanX = 0;
     viewPanY = 0;
+    windowView = false;
     forceReleaseAll(mouseCursor);
     pointers = {};
     gesture = "";
@@ -1075,7 +1153,9 @@
       touch: !!touchModeOn,
       cursor: window.sdaGetCursorInfo ? window.sdaGetCursorInfo() : null,
       lastInput: window.__sdaLastInput || null,
-      fullscreen: !!(document.fullscreenElement || document.webkitFullscreenElement)
+      fullscreen: !!(document.fullscreenElement || document.webkitFullscreenElement),
+      mode: viewMode,
+      windowView: windowView
     };
   };
 
@@ -1437,8 +1517,9 @@
     }
     var fit = document.getElementById("sda-fit-btn");
     if (fit) {
-      fit.setAttribute("data-fit", viewScale <= 1.001 ? "1" : "0");
-      fit.title = viewScale <= 1.001 ? "Already fit to the screen" : "Reset zoom to fit the screen";
+      var isFit = viewScale <= 1.001 && viewMode === "fit";
+      fit.setAttribute("data-fit", isFit ? "1" : "0");
+      fit.title = isFit ? "Already fit to the screen" : "Reset zoom to fit the screen";
     }
     var bar = document.getElementById("sda-session-tools");
     if (bar) bar.setAttribute("data-touch", touchModeOn ? "1" : "0");
@@ -1452,7 +1533,8 @@
 
   function onFitClick(ev) {
     stopToolEvent(ev);
-    resetZoom();
+    if (viewMode !== "fit") setViewMode("fit");
+    else resetZoom();
   }
 
   function ensureSessionTools() {
@@ -1530,6 +1612,7 @@
       bar.appendChild(lbtn);
       bar.appendChild(rbtn);
       document.body.appendChild(bar);
+      try { if (typeof window.sdaExtendSessionTools === "function") window.sdaExtendSessionTools(bar); } catch (eX) {}
     }
     updateSessionTools();
   }
