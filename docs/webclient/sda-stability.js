@@ -1145,6 +1145,7 @@
       Shift: "VK_SHIFT", Control: "VK_CONTROL", Alt: "VK_MENU", Meta: "Meta"
     };
     if (special[k]) return special[k];
+    if (/^F([1-9]|1[0-2])$/.test(k)) return "VK_" + k;
     if (k.length === 1) return k;
     return "";
   }
@@ -1185,6 +1186,7 @@
   function claimKeyEvent(ev) {
     var mine = false;
     try {
+      patchConnKeys(window.curConn);
       if (window.curConn) {
         var ae = document.activeElement;
         if (ae && ae.id === "sda-kb-host") mine = kbHostWillSend(ev);
@@ -1193,6 +1195,46 @@
     } catch (e) {}
     keyClaimAt = mine ? keyNow() : -1e9;
   }
+  // Connection-level single-sender guard. Every key path (our listener, the
+  // iPad keyboard host, Flutter RawKeyboard via setByName, or anything calling
+  // curConn.inputKey/inputString directly) ends at the Connection. For each
+  // physical keydown/keyup, the first sender (ours or "other") owns that event
+  // and any send from the other side for the same event is dropped.
+  var KEY_GUARD_MS = 400;
+  var physKey = null;
+  window.__sdaKeyGuard = { allowed: 0, dropped: 0, free: 0 };
+  function notePhysKey(ev) {
+    if (!ev || (ev.type !== "keydown" && ev.type !== "keyup")) return;
+    physKey = { t: keyNow(), owner: "" };
+  }
+  window.addEventListener("keydown", notePhysKey, true);
+  window.addEventListener("keyup", notePhysKey, true);
+  function guardKeySend() {
+    var g = window.__sdaKeyGuard;
+    var k = physKey;
+    if (!k || keyNow() - k.t > KEY_GUARD_MS) { g.free++; return true; }
+    var who = ownKeySend > 0 ? "own" : "other";
+    if (!k.owner) k.owner = who;
+    if (k.owner !== who) { g.dropped++; return false; }
+    g.allowed++;
+    return true;
+  }
+  function patchConnKeys(c) {
+    if (!c || c.__sdaKeyGuard) return;
+    try {
+      ["inputKey", "inputString"].forEach(function (fn) {
+        var o = c[fn];
+        if (typeof o !== "function") return;
+        c[fn] = function () {
+          if (!guardKeySend()) return;
+          return o.apply(c, arguments);
+        };
+      });
+      c.__sdaKeyGuard = true;
+    } catch (e) {}
+  }
+  setInterval(function () { try { patchConnKeys(window.curConn); } catch (e) {} }, 200);
+
   function isDuplicateFlutterKey(name) {
     if (name !== "input_key" || ownKeySend > 0) return false;
     if (keyNow() - keyClaimAt < KEY_DEDUP_MS) {
