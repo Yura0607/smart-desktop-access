@@ -6,7 +6,7 @@
   // bundled web encoder does not know (restart) are encoded here and sent
   // through the session's own encrypted channel, with the same nonce counter.
   // ---------------------------------------------------------------------------
-  var VER = "20261115-ctl1";
+  var VER = "20261115-ctl2";
   var stats = window.__sdaCtl = { ver: VER, sent: [] };
 
   function conn() { return window.curConn || null; }
@@ -135,8 +135,16 @@
 
   // --- UI ---------------------------------------------------------------------
   var CSS = [
-    "#sda-ctl-fab{position:fixed;left:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:2147483100;height:40px;padding:0 16px;border:0;border-radius:20px;background:linear-gradient(135deg,#6d28d9,#2563eb);color:#fff;font:650 14px/40px system-ui,-apple-system,'Segoe UI',sans-serif;box-shadow:0 2px 10px rgba(30,27,75,.35);cursor:pointer;-webkit-tap-highlight-color:transparent;}",
+    "#sda-ctl-dbar #sda-ctl-fab{background:linear-gradient(135deg,#6d28d9,#2563eb);}",
     "#sda-ctl-btn{background:linear-gradient(135deg,#6d28d9,#2563eb)!important;color:#fff!important;}",
+    "#sda-add-btn,#sda-sess-btn{background:#4338ca!important;color:#fff!important;} #sda-disc-btn{background:#fff!important;color:#be123c!important;}",
+    "#sda-ctl-dbar{position:fixed;left:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:2147483100;display:flex;gap:8px;flex-wrap:wrap;max-width:calc(100vw - 260px);}",
+    "#sda-ctl-dbar button{height:40px;padding:0 16px;border:0;border-radius:20px;background:#4338ca;color:#fff;font:650 14px/40px system-ui,-apple-system,'Segoe UI',sans-serif;box-shadow:0 2px 10px rgba(30,27,75,.35);cursor:pointer;-webkit-tap-highlight-color:transparent;}",
+    "#sda-ctl-dbar #sda-disc-btn2{background:#fff;color:#be123c;}",
+    ".sda-ctl-pc{display:flex;align-items:center;gap:12px;padding:12px 14px;margin:0 0 8px;border-radius:12px;background:#eef2ff;border:1px solid #c7d2fe;color:#1e1b4b;text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent;}",
+    ".sda-ctl-pc.off{opacity:.6;cursor:default;} .sda-ctl-pc:not(.off):active{background:#ddd6fe;}",
+    ".sda-ctl-dot{width:14px;height:14px;border-radius:50%;flex:0 0 14px;} .sda-ctl-pctext{display:flex;flex-direction:column;min-width:0;flex:1;} .sda-ctl-pctext b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .sda-ctl-pctext small{color:#64748b;font-size:12px;}",
+    ".sda-ctl-b.small{min-height:36px;min-width:0;padding:6px 12px;}",
     "#sda-cad-btn{background:#4c1d95!important;color:#fff!important;}",
     "#sda-ctl-panel{position:fixed;z-index:2147483300;left:50%;top:50%;transform:translate(-50%,-50%);width:min(460px,calc(100vw - 24px));max-height:calc(100vh - 40px);overflow:auto;-webkit-overflow-scrolling:touch;background:#fff;color:#1e1b4b;border-radius:18px;box-shadow:0 18px 50px rgba(30,27,75,.45);font:15px/1.35 system-ui,-apple-system,'Segoe UI',sans-serif;}",
     "#sda-ctl-panel *{box-sizing:border-box;}",
@@ -252,6 +260,12 @@
     var p = shell("Remote controls", peerName() + (plat ? " · " + plat : ""));
     p.setAttribute("data-kind", "menu");
 
+    var ss = section(p, "Session", "g3");
+    ss.g.appendChild(btn("+ Add computer", "add", actAddComputer, { cls: "primary", title: "Open another computer in a new tab; this one stays open" }));
+    var nOpen = openSessions().length;
+    ss.g.appendChild(btn("⇄ Sessions (" + nOpen + ")", "sessions", actSessions, { title: "Computers open in this browser" }));
+    ss.g.appendChild(btn("Disconnect", "disconnect", actDisconnect, { cls: "danger" }));
+
     var a = section(p, "Keys and power");
     a.g.appendChild(btn("Ctrl + Alt + Del", "cad", actCad, { title: "Send Ctrl+Alt+Del (Windows sign-in / security screen)" }));
     a.g.appendChild(btn("Lock screen", "lock", actLock));
@@ -291,14 +305,14 @@
     if (pnl && scroll) pnl.scrollTop = scroll;
   }
 
-  function confirmBox(title, text, okLabel, onOk) {
+  function confirmBox(title, text, okLabel, onOk, okCls) {
     var p = shell(title);
     p.setAttribute("data-kind", "confirm");
     var d = el("div", { cls: "sda-ctl-dlg" });
     d.appendChild(el("p", null, text));
     var row = el("div", { cls: "sda-ctl-row" });
     row.appendChild(btn("Cancel", "cancel", function () { closePanel(); }));
-    row.appendChild(btn(okLabel, "confirm", function () { closePanel(); onOk(); }, { cls: "red" }));
+    row.appendChild(btn(okLabel, "confirm", function () { closePanel(); onOk(); }, { cls: okCls || "red" }));
     d.appendChild(row);
     p.appendChild(d);
   }
@@ -331,24 +345,256 @@
   }
   function openFromButton(ev) { stop(ev); openMenu(false); }
 
-  // iPad: buttons in the bottom session bar. Desktop browsers: a floating button.
+  // --- open sessions across tabs (same browser) -------------------------------
+  var TAB_UID = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  var REG_KEY = "sda-open-sessions";
+  var REG_TTL = 90000;
+  function readReg() {
+    var r = {};
+    try { r = JSON.parse(localStorage.getItem(REG_KEY) || "{}") || {}; } catch (e) { r = {}; }
+    var now = Date.now(), out = {};
+    Object.keys(r).forEach(function (k) { var v = r[k]; if (v && v.id && now - (v.ts || 0) < REG_TTL) out[k] = v; });
+    return out;
+  }
+  function writeReg(r) { try { localStorage.setItem(REG_KEY, JSON.stringify(r)); } catch (e) {} }
+  function curId() { var c = conn(); return c && !c._userClosed && c._id ? String(c._id) : ""; }
+  function heartbeat() {
+    var r = readReg(), id = curId();
+    if (id) r[TAB_UID] = { id: id, name: peerName(), ts: Date.now() };
+    else delete r[TAB_UID];
+    writeReg(r);
+  }
+  function dropSelf() { var r = readReg(); delete r[TAB_UID]; writeReg(r); }
+  window.addEventListener("pagehide", dropSelf);
+  window.addEventListener("beforeunload", dropSelf);
+  function openSessions() {
+    var r = readReg(), list = [];
+    Object.keys(r).forEach(function (k) { list.push({ tab: k, id: r[k].id, name: r[k].name, mine: k === TAB_UID }); });
+    var id = curId();
+    if (id && !r[TAB_UID]) list.push({ tab: TAB_UID, id: id, name: peerName(), mine: true });
+    list.sort(function (a, b) { return a.mine ? -1 : b.mine ? 1 : String(a.name).localeCompare(String(b.name)); });
+    return list;
+  }
+  window.sdaOpenSessions = openSessions;
+  var bc = null;
+  try { bc = new BroadcastChannel("sda-tabs"); } catch (e) { bc = null; }
+  function onTabMsg(m) {
+    if (!m || m.to !== TAB_UID || m.type !== "focus") return;
+    try { window.focus(); } catch (e) {}
+    flashTitle();
+  }
+  if (bc) bc.onmessage = function (ev) { onTabMsg(ev.data); };
+  window.addEventListener("storage", function (ev) {
+    if (ev.key === "sda-tab-msg" && ev.newValue) { try { onTabMsg(JSON.parse(ev.newValue)); } catch (e) {} }
+    if (ev.key === REG_KEY) updateBars();
+  });
+  function askFocus(tab) {
+    var m = { to: tab, type: "focus", t: Date.now() };
+    try { if (bc) bc.postMessage(m); } catch (e) {}
+    try { localStorage.setItem("sda-tab-msg", JSON.stringify(m)); } catch (e2) {}
+  }
+  var baseTitle = null, flashT = null;
+  function wantTitle() { return "SDA · " + peerName(); }
+  function updateTitle() {
+    if (curId() && inSession()) {
+      if (baseTitle === null) baseTitle = document.title;
+      if (!flashT && document.title !== wantTitle()) document.title = wantTitle();
+    } else if (baseTitle !== null) { document.title = baseTitle; baseTitle = null; }
+  }
+  function flashTitle() {
+    var n = 0;
+    clearInterval(flashT);
+    flashT = setInterval(function () {
+      document.title = (n % 2 ? "" : "▶ ") + wantTitle();
+      if (++n > 8) { clearInterval(flashT); flashT = null; updateTitle(); }
+    }, 600);
+  }
+
+  // --- new tab opened from "+ Computer": connect once, like a list tap --------
+  // The link is /webclient/#/?id=<ID>. The bundle's own ?id= auto-connect waits
+  // for a Flutter callback that the home page never registers, so do the same
+  // thing the computer list does (setByName("connect")), once, when ready.
+  var LOAD_T = Date.now();
+  var pendingOpen = null;
+  try {
+    var hm = (location.hash || "").match(/[?&]id=([^&]+)/);
+    if (hm) {
+      var hid = decodeURIComponent(hm[1]).trim();
+      if (/^[A-Za-z0-9_-]{3,32}$/.test(hid)) pendingOpen = hid;
+    }
+  } catch (eH) {}
+  function maybeOpenPending() {
+    if (!pendingOpen) return;
+    if (conn() || window.__sdaAutoConnectDone) { pendingOpen = null; return; }
+    if (!bridgeReady() || Date.now() - LOAD_T < 1500) return;
+    if (!document.querySelector("flt-glass-pane") && !document.querySelector("flutter-view")) return;
+    if (!token()) { if (Date.now() - LOAD_T > 30000) pendingOpen = null; return; }
+    if (!window.__sdaServerConfDone && Date.now() - LOAD_T < 10000) return;
+    var id = pendingOpen;
+    pendingOpen = null;
+    window.__sdaAutoConnectDone = true;
+    try {
+      if (typeof window.sdaOpenComputer === "function") window.sdaOpenComputer(id);
+      else window.setByName("connect", id);
+      log("auto_open", id);
+    } catch (e) {}
+  }
+
+  // --- disconnect -------------------------------------------------------------
+  function doDisconnect() {
+    closePanel();
+    dropSelf();
+    try { if (bridgeReady()) window.setByName("close", ""); log("close", ""); } catch (e) {}
+    // Back to a clean computer list in this tab (no auto-connect id in the URL).
+    setTimeout(function () {
+      try { history.replaceState(null, "", location.pathname); } catch (e) {}
+      try { location.reload(); } catch (e2) {}
+    }, 250);
+  }
+  function actDisconnect() {
+    confirmBox("Disconnect from " + peerName() + "?",
+      "Only this connection is closed. Nothing changes on the remote computer.",
+      "Disconnect", doDisconnect, "primary");
+  }
+
+  // --- add another computer (new tab) -----------------------------------------
+  function token() { try { return localStorage.getItem("access_token") || ""; } catch (e) { return ""; } }
+  function cleanName(n) { return String(n || "").replace(/\s*@(Online|Offline)\s*$/i, "").trim(); }
+  function devName(d) { return cleanName(d.alias || d.hostname || d.id) || String(d.id); }
+  function fetchDevices(cb) {
+    var cached = [];
+    try { cached = (window.sdaPeerStatus && window.sdaPeerStatus().devices) || []; } catch (e) {}
+    var tok = token();
+    if (!tok) { cb(cached, false); return; }
+    fetch("/companion/api/v1/web-status", { method: "GET", headers: { Authorization: "Bearer " + tok }, credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("http"); return r.json(); })
+      .then(function (data) {
+        var list = ((data && data.devices) || []).map(function (row) {
+          return { id: String(row.id || "").trim(), alias: cleanName(row.alias), hostname: cleanName(row.hostname), online: !!row.online };
+        }).filter(function (d) { return !!d.id; });
+        list.sort(function (a, b) { if (a.online !== b.online) return a.online ? -1 : 1; return devName(a).toLowerCase().localeCompare(devName(b).toLowerCase()); });
+        cb(list.length ? list : cached, true);
+      })
+      .catch(function () { cb(cached, false); });
+  }
+  function sessionUrl(id) { return location.pathname + "#/?id=" + encodeURIComponent(id); }
+  function actAddComputer() {
+    var p = shell("Open another computer", "It opens in a new tab. This session stays open.");
+    p.setAttribute("data-kind", "picker");
+    var box = el("div", { cls: "sda-ctl-dlg" });
+    var listEl = el("div", { id: "sda-ctl-pick" });
+    listEl.appendChild(el("p", { cls: "sda-ctl-note" }, "Loading computers…"));
+    box.appendChild(listEl);
+    p.appendChild(box);
+    fetchDevices(function (devs, fresh) {
+      if (!document.getElementById("sda-ctl-pick")) return;
+      listEl.innerHTML = "";
+      var open = {};
+      openSessions().forEach(function (s) { open[s.id] = s; });
+      var mine = curId();
+      var online = devs.filter(function (d) { return d.online; }).length;
+      listEl.appendChild(el("p", { cls: "sda-ctl-note" }, devs.length ? (devs.length + " computers, " + online + " online. Tap one to open it in a new tab.") : "No computers in your list."));
+      devs.forEach(function (d) {
+        var isMine = d.id === mine, other = open[d.id] && !open[d.id].mine;
+        var canOpen = d.online && !isMine && !other;
+        var row = el(canOpen ? "a" : "div", { cls: "sda-ctl-pc" + (canOpen ? "" : " off"), "data-id": d.id });
+        if (canOpen) { row.setAttribute("href", sessionUrl(d.id)); row.setAttribute("target", "_blank"); row.setAttribute("rel", "noopener"); }
+        var dot = el("span", { cls: "sda-ctl-dot" }); dot.style.background = d.online ? "#16a34a" : "#9ca3af";
+        var tx = el("span", { cls: "sda-ctl-pctext" });
+        tx.appendChild(el("b", null, devName(d)));
+        tx.appendChild(el("small", null, d.id + " · " + (isMine ? "open in this tab" : other ? "already open in another tab" : d.online ? "Online" : "Offline")));
+        row.appendChild(dot); row.appendChild(tx);
+        if (canOpen) {
+          row.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            log("open_tab", d.id);
+            toast("Opening " + devName(d) + " in a new tab…");
+            setTimeout(closePanel, 300);
+          });
+        } else if (other) {
+          var go = btn("Switch", "goto-" + d.id, function () { switchTo(open[d.id]); });
+          go.className += " small";
+          row.appendChild(go);
+        }
+        listEl.appendChild(row);
+      });
+      if (!fresh && !token()) listEl.appendChild(el("p", { cls: "sda-ctl-note" }, "Sign in on the computer list to see online status."));
+    });
+  }
+  window.sdaAddComputer = actAddComputer;
+
+  function switchTo(s) {
+    if (!s || s.mine) { closePanel(); return; }
+    askFocus(s.tab);
+    closePanel();
+    toast("If the browser does not switch by itself, open the tab named “SDA · " + s.name + "”.");
+  }
+  function actSessions() {
+    var list = openSessions();
+    var p = shell("Open sessions", list.length + " computer" + (list.length === 1 ? "" : "s") + " open in this browser");
+    p.setAttribute("data-kind", "sessions");
+    var sec = section(p, null);
+    sec.g.style.gridTemplateColumns = "1fr";
+    list.forEach(function (s) {
+      sec.g.appendChild(btn((s.mine ? "● " : "") + s.name + " (" + s.id + ")" + (s.mine ? " · this tab" : ""), "sess-" + s.id, function () { switchTo(s); }, { pressed: s.mine }));
+    });
+    var add = section(p, null);
+    add.g.style.gridTemplateColumns = "1fr";
+    add.g.appendChild(btn("+ Open another computer", "add", actAddComputer, { cls: "primary" }));
+  }
+  window.sdaShowSessions = actSessions;
+
+  // --- quick buttons ------------------------------------------------------------
+  function quick(id, label, aria, fn) {
+    var b = el("button", { type: "button", id: id, "aria-label": aria, title: aria }, label);
+    b.addEventListener("click", function (ev) { stop(ev); fn(); });
+    return b;
+  }
+  function updateBars() {
+    var n = openSessions().length;
+    ["sda-sess-btn", "sda-sess-btn2"].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (!b) return;
+      b.textContent = "⇄ " + n + " open";
+      b.style.display = n > 1 ? "" : "none";
+    });
+  }
+  // iPad: buttons in the bottom session bar.
   window.sdaExtendSessionTools = function (bar) {
     if (!bar || document.getElementById("sda-ctl-btn")) return;
     ensureStyle();
-    var cad = el("button", { type: "button", id: "sda-cad-btn", "aria-label": "Send Ctrl+Alt+Del" }, "Ctrl+Alt+Del");
-    cad.addEventListener("click", function (ev) { stop(ev); actCad(); });
-    var b = el("button", { type: "button", id: "sda-ctl-btn", "aria-label": "Remote controls" }, "☰ Controls");
-    b.addEventListener("click", openFromButton);
+    var cad = quick("sda-cad-btn", "Ctrl+Alt+Del", "Send Ctrl+Alt+Del", actCad);
+    var b = quick("sda-ctl-btn", "☰ Controls", "Remote controls", function () { openMenu(false); });
     bar.insertBefore(b, bar.firstChild);
     shieldPointer(bar);
     var fit = document.getElementById("sda-fit-btn");
     if (fit && fit.nextSibling) bar.insertBefore(cad, fit.nextSibling); else bar.appendChild(cad);
+    bar.appendChild(quick("sda-add-btn", "+ Computer", "Open another computer in a new tab", actAddComputer));
+    bar.appendChild(quick("sda-sess-btn", "⇄", "Open sessions", actSessions));
+    bar.appendChild(quick("sda-disc-btn", "Disconnect", "Disconnect from this computer", actDisconnect));
+    updateBars();
   };
+  // Desktop browsers: a floating bar at the top left.
+  function ensureDesktopBar(want) {
+    var bar = document.getElementById("sda-ctl-dbar");
+    if (!want) { if (bar && bar.parentNode) bar.parentNode.removeChild(bar); return; }
+    if (bar || !document.body) return;
+    ensureStyle();
+    bar = el("div", { id: "sda-ctl-dbar" });
+    var fab = quick("sda-ctl-fab", "☰ Controls", "Remote controls", function () { openMenu(false); });
+    bar.appendChild(fab);
+    bar.appendChild(quick("sda-add-btn2", "+ Computer", "Open another computer in a new tab", actAddComputer));
+    bar.appendChild(quick("sda-sess-btn2", "⇄", "Open sessions", actSessions));
+    bar.appendChild(quick("sda-disc-btn2", "Disconnect", "Disconnect from this computer", actDisconnect));
+    shieldPointer(bar);
+    document.body.appendChild(bar);
+    updateBars();
+  }
 
   // Mouse moves made over our own buttons/menu (desktop browsers hover) must
   // not move or click the remote mouse; the page-level Flutter listener sees
   // them too, so drop those at the bridge.
-  var OUR_UI = "#sda-ctl-panel,#sda-ctl-shade,#sda-ctl-fab,#sda-session-tools,#sda-ctl-toast";
+  var OUR_UI = "#sda-ctl-panel,#sda-ctl-shade,#sda-ctl-dbar,#sda-session-tools,#sda-ctl-toast";
   var lastPtrOurs = false;
   ["pointermove", "pointerdown", "pointerup", "pointerover", "pointerout", "pointerenter", "pointerleave", "mousemove", "mousedown", "mouseup", "mouseover", "mouseout", "touchstart", "touchend"].forEach(function (t) {
     window.addEventListener(t, function (ev) {
@@ -375,22 +621,18 @@
     window.setByName = w;
   }
 
+  var lastHb = 0;
   function tick() {
     try { wrapBridge(); } catch (eW) {}
     try {
       var live = inSession();
       var bar = document.getElementById("sda-session-tools");
       if (bar) window.sdaExtendSessionTools(bar);
-      var fab = document.getElementById("sda-ctl-fab");
-      var wantFab = live && !bar && !isIpadUi();
-      if (wantFab && !fab && document.body) {
-        ensureStyle();
-        fab = el("button", { type: "button", id: "sda-ctl-fab", "aria-label": "Remote controls" }, "☰ Controls");
-        fab.addEventListener("click", openFromButton);
-        shieldPointer(fab);
-        document.body.appendChild(fab);
-      } else if (!wantFab && fab && fab.parentNode) fab.parentNode.removeChild(fab);
+      ensureDesktopBar(live && !bar && !isIpadUi());
       if (!live && panelOpen) closePanel();
+      maybeOpenPending();
+      if (Date.now() - lastHb > 3000) { lastHb = Date.now(); heartbeat(); updateBars(); }
+      updateTitle();
     } catch (e) {}
   }
   setInterval(tick, 500);
