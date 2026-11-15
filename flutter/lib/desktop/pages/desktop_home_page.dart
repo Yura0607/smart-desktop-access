@@ -49,6 +49,15 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsProcessTrust = false;
   var watchIsInputMonitoring = false;
   var loginServicePrompted = false;
+  final Set<String> _macPermissionsPrompted = {};
+
+  void _autoPromptMacPermission(String kind, void Function() prompt) {
+    if (bind.isOutgoingOnly() || _macPermissionsPrompted.contains(kind)) {
+      return;
+    }
+    _macPermissionsPrompted.add(kind);
+    WidgetsBinding.instance.addPostFrameCallback((_) => prompt());
+  }
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
   bool isCardClosed = false;
@@ -502,7 +511,30 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
     } else if (isMacOS) {
       final isOutgoingOnly = bind.isOutgoingOnly();
+      // The login service (LaunchAgent + LaunchDaemon) comes first: it is what
+      // starts the client when someone logs in, and it does not depend on the
+      // privacy permissions below. macOS asks for an admin password once.
+      if (!isOutgoingOnly &&
+          !svcStopped.value &&
+          bind.mainIsInstalled() &&
+          !bind.mainIsInstalledDaemon(prompt: false)) {
+        if (!loginServicePrompted) {
+          loginServicePrompted = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            bind.mainIsInstalledDaemon(prompt: true);
+          });
+        }
+        return buildInstallCard("", "install_daemon_tip", "Install", () async {
+          bind.mainIsInstalledDaemon(prompt: true);
+        });
+      }
+      // macOS never grants these silently. Show the system prompt once per
+      // start for the first missing one, and keep the card until it is on.
       if (!(isOutgoingOnly || bind.mainIsCanScreenRecording(prompt: false))) {
+        _autoPromptMacPermission('screen', () {
+          bind.mainIsCanScreenRecording(prompt: true);
+          watchIsCanScreenRecording = true;
+        });
         return buildInstallCard("Permissions", "config_screen", "Configure",
             () async {
           bind.mainIsCanScreenRecording(prompt: true);
@@ -513,29 +545,32 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           watchIsCanScreenRecording = true;
         }, help: 'Help', link: translate("doc_mac_permission"));
       } else if (!isOutgoingOnly && !bind.mainIsProcessTrusted(prompt: false)) {
+        // Without Accessibility macOS silently drops remote typing and clicks.
+        _autoPromptMacPermission('accessibility', () {
+          bind.mainIsProcessTrusted(prompt: true);
+          watchIsProcessTrust = true;
+        });
         return buildInstallCard("Permissions", "config_acc", "Configure",
             () async {
           bind.mainIsProcessTrusted(prompt: true);
+          launchUrl(Uri.parse(
+              'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'));
           watchIsProcessTrust = true;
         }, help: 'Help', link: translate("doc_mac_permission"));
       } else if (!bind.mainIsCanInputMonitoring(prompt: false)) {
+        _autoPromptMacPermission('input', () {
+          bind.mainIsCanInputMonitoring(prompt: true);
+          watchIsInputMonitoring = true;
+        });
         return buildInstallCard("Permissions", "config_input", "Configure",
             () async {
           bind.mainIsCanInputMonitoring(prompt: true);
+          if (!isOutgoingOnly) {
+            launchUrl(Uri.parse(
+                'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent'));
+          }
           watchIsInputMonitoring = true;
         }, help: 'Help', link: translate("doc_mac_permission"));
-      } else if (!isOutgoingOnly &&
-          !svcStopped.value &&
-          bind.mainIsInstalled() &&
-          !bind.mainIsInstalledDaemon(prompt: false)) {
-        if (!loginServicePrompted) {
-          loginServicePrompted = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            bind.mainIsInstalledDaemon(prompt: true);
-          });
-        }
-        return buildInstallCard(
-            "", "install_daemon_tip", "", () {});
       }
       //// Disable microphone configuration for macOS. We will request the permission when needed.
       // else if ((await osxCanRecordAudio() !=

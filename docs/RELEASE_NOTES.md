@@ -32,6 +32,16 @@ Flutter does not support 32-bit Windows, so this installer uses the older Sciter
 - Voice, video (camera), and chat still use the Rust core, through the Sciter connection manager rather than the Flutter one.
 - There is no 32-bit Admin app.
 
+### Mac client: start at login and no password prompt
+
+Same model as 64-bit Windows:
+
+- On first start from Applications, the client installs its login service and macOS asks for an administrator password once. This writes `/Library/LaunchAgents/com.smartdesktopaccess.SmartDesktopAccess_server.plist` (runs the client's server at the login window and in every user session) and `/Library/LaunchDaemons/com.smartdesktopaccess.SmartDesktopAccess_service.plist` (the root helper). After that the client starts by itself on every boot and login.
+- Earlier Mac builds wrote these files under a `com.carriez.SmartDesktopAccess_*` name that the app itself did not look for, so it kept asking to install the service on every start. The new installer step removes the old files and writes the new ones.
+- The client makes a random permanent password on first run, keeps it in its settings folder, and registers it with the server every minute. The manager and the web client fill it in, and with a correct password no Accept panel appears. Only the logged-in user's copy registers the password; the copy that runs at the login window gets the same password hash from the user session, so the two can no longer drift apart.
+- macOS does not let any app grant itself Screen Recording, Accessibility or Input Monitoring. On first start the client opens each system prompt in turn and keeps a card on its window until the switch is on. Without Accessibility the screen still shows but macOS silently ignores remote typing and clicks; the client now tells the person connecting when that is the case.
+- After installing a new build, macOS can keep showing the old Accessibility switch as on while it no longer applies (the app is not signed with a paid Apple certificate, so each build looks like a new app). If typing stops working after an update: System Settings > Privacy & Security > Accessibility, select Smart Desktop Access, remove it with the minus button, add it again from Applications, and reconnect. Do the same under Input Monitoring and Screen Recording if needed.
+
 ## iPhone and iPad
 
 There is no App Store build and no paid Apple developer account. The iOS artifact is unsigned.

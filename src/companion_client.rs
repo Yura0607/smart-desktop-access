@@ -41,6 +41,15 @@ pub fn start() {
 }
 
 async fn register_once() -> Result<(), String> {
+    // On macOS the LaunchAgent also runs as root at the login window. That copy
+    // gets the user's settings (including the password hash) from the user
+    // session through the root service. If it made and registered its own
+    // password, the stored one would stop matching and every connection would
+    // ask for a password. Only the logged-in user's server registers.
+    #[cfg(target_os = "macos")]
+    if crate::platform::macos::is_root() {
+        return Err("ID is not ready".to_owned());
+    }
     let id = Config::get_id();
     if id.is_empty() {
         return Err("ID is not ready".to_owned());
@@ -129,6 +138,15 @@ fn schedule_self_uninstall() {
 fn ensure_password() -> Result<String, String> {
     if let Some(existing) = read_state(PASSWORD_FILE)? {
         if !existing.is_empty() {
+            // Keep the saved password and the one the server checks the same.
+            // A config reset or a sync from another copy of the app could have
+            // replaced it; the manager only knows the saved one.
+            if !permanent_password_matches(&existing) {
+                log::info!("Permanent password did not match the saved one; restoring it");
+                if !Config::set_permanent_password(&existing) {
+                    return Err("could not store the permanent password".to_owned());
+                }
+            }
             return Ok(existing);
         }
     }
@@ -138,6 +156,18 @@ fn ensure_password() -> Result<String, String> {
     }
     write_state(PASSWORD_FILE, &password)?;
     Ok(password)
+}
+
+fn permanent_password_matches(password: &str) -> bool {
+    let (storage, salt) = Config::get_local_permanent_password_storage_and_salt();
+    if storage.is_empty() {
+        return false;
+    }
+    match hbb_common::config::decode_permanent_password_h1_from_storage(&storage) {
+        Some(h1) => h1 == hbb_common::config::compute_permanent_password_h1(password, &salt),
+        // Unknown storage format: leave it alone rather than rewrite it every minute.
+        None => true,
+    }
 }
 
 fn state_path(name: &str) -> Result<PathBuf, String> {

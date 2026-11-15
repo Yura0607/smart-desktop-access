@@ -2236,6 +2236,8 @@ impl Connection {
             if !wait_session_id_confirm {
                 self.try_sub_monitor_services();
             }
+            #[cfg(target_os = "macos")]
+            self.warn_if_mac_input_not_allowed().await;
         }
         true
     }
@@ -4782,6 +4784,37 @@ impl Connection {
             }
             drop(lock);
         }
+    }
+
+    /// macOS drops synthetic key and click events from an app that is not
+    /// allowed under Accessibility, without any error. The screen still shows
+    /// and the pointer can still move, so it looks like typing is broken.
+    /// Tell the person connecting, and ask macOS to show its own permission
+    /// prompt on the Mac once per server run.
+    #[cfg(target_os = "macos")]
+    async fn warn_if_mac_input_not_allowed(&mut self) {
+        static PROMPTED: AtomicBool = AtomicBool::new(false);
+        if crate::platform::macos::is_root() || !self.peer_keyboard_enabled() {
+            return;
+        }
+        if crate::platform::macos::is_process_trusted(false) {
+            return;
+        }
+        log::warn!("Accessibility is not allowed for this app; remote keyboard and clicks will be ignored by macOS");
+        if !PROMPTED.swap(true, Ordering::SeqCst) {
+            std::thread::spawn(|| {
+                crate::platform::macos::is_process_trusted(true);
+            });
+        }
+        let mut msg_out = Message::new();
+        msg_out.set_message_box(MessageBox {
+            msgtype: "nook-nocancel-hasclose".to_owned(),
+            title: "Keyboard and mouse are blocked on this Mac".to_owned(),
+            text: "macOS has not allowed Smart Desktop Access to control this Mac, so typing and clicks are ignored. On the Mac, open System Settings > Privacy & Security > Accessibility and turn on Smart Desktop Access (also under Input Monitoring). If it is already on, remove it with the minus button, add it again from Applications, and reconnect.".to_owned(),
+            link: "".to_owned(),
+            ..Default::default()
+        });
+        self.send(msg_out).await;
     }
 
     #[cfg(windows)]
